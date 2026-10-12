@@ -86,26 +86,26 @@ const DATA = {
     shown: 6,
     total: 1842,
     rows: [
-      { prio: 1, id: "000815296", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289001 S)", mu: "MU-39102" },
-      { prio: 1, id: "000815297", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289002 M)", mu: "MU-39102" },
-      { prio: 2, id: "000815298", time: "23 min", state: "Waiting stock", source: "Transfer MKT-02 · ETA 14:10", locs: ["EH14D"], itemsCount: "4 lines · 6 units", mu: "MU-39103" },
-      { prio: 2, id: "000815299", time: "31 min", state: "Picking", source: "WH-01 stock", locs: ["EH14B"], itemsCount: "1 line · 2 units (1524289003 L)", mu: "MU-39102" },
-      { prio: 3, id: "000815300", time: "48 min", state: "Allocated", source: "Production line P2", locs: ["EK03A"], itemsCount: "12 lines · 14 units", mu: "MU-38140" },
-      { prio: 3, id: "000815301", time: "1 h 12 min", state: "Queued", source: "WH-01 stock", locs: ["EM09B"], itemsCount: "1 line · 1 unit", mu: "MU-38290" }
+      { prio: 1, id: "000815296", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289001 S)", mu: "502900" },
+      { prio: 1, id: "000815297", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289002 M)", mu: "502900" },
+      { prio: 2, id: "000815298", time: "23 min", state: "Waiting stock", source: "Transfer MKT-02 · ETA 14:10", locs: ["EH14D"], itemsCount: "4 lines · 6 units", mu: "101003" },
+      { prio: 2, id: "000815299", time: "31 min", state: "Picking", source: "WH-01 stock", locs: ["EH14B"], itemsCount: "1 line · 2 units (1524289003 L)", mu: "502900" },
+      { prio: 3, id: "000815300", time: "48 min", state: "Allocated", source: "Production line P2", locs: ["EK03A"], itemsCount: "12 lines · 14 units", mu: "381402" },
+      { prio: 3, id: "000815301", time: "1 h 12 min", state: "Queued", source: "WH-01 stock", locs: ["EM09B"], itemsCount: "1 line · 1 unit", mu: "382901" }
     ]
   },
   ai: {
-    observation: "Redundant trip alert: Orders 000815296 and 000815297 both request single units from parent SKU 1524289 stored in MU-39102 (Bay EH14, Platform 1). Under discrete picking, the picker walks to EH14, draws Level A cage, walks to pack station, then immediately walks back to EH14 to draw the same cage for 000815297.",
-    evidence: ["EH14D", "EH14A", "MU-39102", "000815296", "000815297", "1524289001", "1524289002", "SIM-2041"],
-    plan: "Batch-wave orders 000815296, 000815297, and 000815299 into a single MU visit at EH14 (saves 2 cage draw-outs, 180m travel, 8.4 min).",
+    observation: "Redundant trip alert: Orders 000815296 and 000815297 both request single units from parent SKU 1524289 stored in MU 502900 (Bay EH14, Platform 1). Under discrete picking, the picker walks to EH14, draws Level A cage, walks to pack station, then immediately walks back to EH14 to draw the same cage for 000815297.",
+    evidence: ["EH14D", "EH14A", "502900", "000815296", "000815297", "1524289001", "1524289002", "SIM-2041"],
+    plan: "Batch-wave orders 000815296, 000815297, and 000815299 into a single MU visit at EH14 for MU 502900 (saves 2 cage draw-outs, 180m travel, 8.4 min).",
     affectedOrders: 3
   },
   locations: {
     "EH14D": {
       status: "Congested",
       platforms: [
-        { name: "Platform 1 (Level A Ground Pull-out)", mu: "MU-39102", boxes: 9, layers: "3 layers of 3", sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 24, lot: "A92", status: "Active" },
-        { name: "Platform 2 (Inner Cage)", mu: "MU-39103", boxes: 6, layers: "2 layers of 3", sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 18, lot: "B17", status: "Reserved" }
+        { name: "Platform 1 (Level A Ground Pull-out)", mu: "502900", boxes: 9, layers: "3 layers of 3", sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 24, lot: "A92", status: "Active" },
+        { name: "Platform 2 (Inner Cage)", mu: "101003", boxes: 6, layers: "2 layers of 3", sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 18, lot: "B17", status: "Reserved" }
       ]
     }
   } as Record<string, any>,
@@ -204,9 +204,11 @@ function platformsOf(code: string) {
     const sku = DATA.skuPool[Math.floor(h * DATA.skuPool.length)];
     const boxes = 6 + Math.floor(h * 4);
     const layers = Math.ceil(boxes / 3);
+    // 6-digit numeric MU (e.g. 502900, 101003)
+    const muNum = 100000 + Math.floor(h * 899999);
     out.push({
       name: "Platform " + (i + 1),
-      mu: "MU-" + (38000 + Math.floor(h * 1800)),
+      mu: String(muNum),
       boxes,
       layers: layers + " layers of 3",
       sku: sku.sku,
@@ -329,11 +331,11 @@ export default function OperationalOverviewPage() {
     if (e.key !== 'Enter') return;
     const q = searchVal.trim().toUpperCase();
 
-    // Check if query is an MU code (e.g. MU-39102)
-    if (q.startsWith('MU-') || q.startsWith('MU')) {
-      const muTarget = q.startsWith('MU-') ? q : `MU-${q.slice(2)}`;
+    // Check if query is a 6-digit MU number (e.g. 502900, 101003)
+    if (/^\d{6}$/.test(q) || q.startsWith('MU-') || q.startsWith('MU')) {
+      const muTarget = /^\d{6}$/.test(q) ? q : q.replace(/^MU-?/, '');
       // Search curated first
-      if (muTarget === 'MU-39102' || muTarget === 'MU-39103') {
+      if (muTarget === '502900' || muTarget === '101003') {
         setSearchErr(null);
         selectLocation('EH14D');
         (e.target as HTMLInputElement).blur();
@@ -362,7 +364,7 @@ export default function OperationalOverviewPage() {
       selectLocation(q);
       (e.target as HTMLInputElement).blur();
     } else {
-      setSearchErr(`No location matches "${q}" — try location codes (EH14D) or MU IDs (MU-39102).`);
+      setSearchErr(`No location matches "${q}" — try location codes (EH14D) or 6-digit MU IDs (502900).`);
       setTimeout(() => setSearchErr(null), 3000);
     }
   };
