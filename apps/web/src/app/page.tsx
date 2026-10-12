@@ -104,8 +104,27 @@ const DATA = {
     "EH14D": {
       status: "Congested",
       platforms: [
-        { name: "Platform 1 (Level A Ground Pull-out)", mu: "502900", boxes: 9, layers: "3 layers of 3", sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 24, lot: "A92", status: "Active" },
-        { name: "Platform 2 (Inner Cage)", mu: "101003", boxes: 6, layers: "2 layers of 3", sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 18, lot: "B17", status: "Reserved" }
+        {
+          name: "Platform 1 (Level A Ground Pull-out)",
+          mu: "502900",
+          totalUnits: 16,
+          isMixed: true,
+          items: [
+            { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
+            { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" },
+            { sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" }
+          ]
+        },
+        {
+          name: "Platform 2 (Inner Cage)",
+          mu: "101003",
+          totalUnits: 12,
+          isMixed: true,
+          items: [
+            { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "B17", status: "Reserved" },
+            { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }
+          ]
+        }
       ]
     }
   } as Record<string, any>,
@@ -159,7 +178,7 @@ function bayOf(code: string) {
 function getMusInBay(bc: string) {
   const p = parseLoc(bc + 'A');
   if (!p) return [];
-  const mus: { mu: string; level: string; sku: string; skuName: string; units: number }[] = [];
+  const mus: { mu: string; level: string; skuCount: number; totalUnits: number; isMixed: boolean }[] = [];
   CONFIG.levels.forEach(lvl => {
     const code = locCode(p.row, p.bay, lvl.id);
     const plats = platformsOf(code);
@@ -167,9 +186,9 @@ function getMusInBay(bc: string) {
       mus.push({
         mu: pl.mu,
         level: lvl.id,
-        sku: pl.sku,
-        skuName: pl.skuName,
-        units: pl.qty
+        skuCount: pl.items?.length || 1,
+        totalUnits: pl.totalUnits || pl.qty || 15,
+        isMixed: pl.isMixed ?? true
       });
     });
   });
@@ -201,21 +220,23 @@ function platformsOf(code: string) {
   const out = [];
   for (let i = 0; i < facts.platforms; i++) {
     const h = hash01(code + "/p" + i);
-    const sku = DATA.skuPool[Math.floor(h * DATA.skuPool.length)];
-    const boxes = 6 + Math.floor(h * 4);
-    const layers = Math.ceil(boxes / 3);
     // 6-digit numeric MU (e.g. 502900, 101003)
     const muNum = 100000 + Math.floor(h * 899999);
+    // Mixed items: 2 to 3 sequential variants from parent, 5 to 6 units each
+    const sku1 = DATA.skuPool[0];
+    const sku2 = DATA.skuPool[1];
+    const qty1 = 5 + Math.floor(h * 2); // 5 or 6 units
+    const qty2 = 5 + Math.floor((1 - h) * 2); // 5 or 6 units
+
     out.push({
       name: "Platform " + (i + 1),
       mu: String(muNum),
-      boxes,
-      layers: layers + " layers of 3",
-      sku: sku.sku,
-      skuName: sku.name,
-      qty: boxes * 24,
-      lot: String.fromCharCode(65 + Math.floor(h * 6)) + pad2(1 + Math.floor(h * 98)),
-      status: h > 0.5 ? "Active" : "Reserved"
+      totalUnits: qty1 + qty2,
+      isMixed: true,
+      items: [
+        { sku: sku1.sku, skuName: sku1.name, parentSku: sku1.parent, qty: qty1, lot: "A92", status: "Active" },
+        { sku: sku2.sku, skuName: sku2.name, parentSku: sku2.parent, qty: qty2, lot: "A92", status: "Active" }
+      ]
     });
   }
   return out;
@@ -732,8 +753,8 @@ export default function OperationalOverviewPage() {
                           <span className="text-text-3 font-normal text-[10px]">Lvl {item.level}</span>
                           <span className="text-cyan-300 font-semibold">{item.mu}</span>
                         </div>
-                        <span className="text-text-2 text-[10px] truncate max-w-[110px]" title={item.skuName}>
-                          {item.sku}
+                        <span className="text-text-2 text-[10px] truncate max-w-[110px]">
+                          {item.skuCount} SKUs · {item.totalUnits}u
                         </span>
                       </div>
                     ))}
@@ -930,7 +951,7 @@ export default function OperationalOverviewPage() {
                         >
                           <span className="text-text-3 text-[10px]">L{item.level}:</span>
                           <span className="text-cyan-300 font-bold">{item.mu}</span>
-                          <span className="text-text-3 text-[9px]">({item.units}u)</span>
+                          <span className="text-text-3 text-[9px]">({item.totalUnits}u · {item.skuCount} SKUs)</span>
                         </div>
                       ))}
                     </div>
@@ -944,6 +965,7 @@ export default function OperationalOverviewPage() {
                     <div className="space-y-1.5">
                       {platformsOf(selectedLoc).map((pl: any, i: number) => {
                         const isOpen = openPlatforms[i] ?? (i === 0);
+                        const items = pl.items || [{ sku: pl.sku, skuName: pl.skuName, parentSku: pl.parentSku, qty: pl.qty, lot: pl.lot, status: pl.status }];
                         return (
                           <div key={i} className="border border-border rounded overflow-hidden bg-bg-1">
                             <button
@@ -952,26 +974,36 @@ export default function OperationalOverviewPage() {
                             >
                               <ChevronRight className={`h-3 w-3 text-text-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                               <span className="font-semibold text-text-1">{pl.name}</span>
-                              <span className="mono text-text-2">{pl.mu}</span>
-                              <span className="text-text-3 text-[10px] ml-auto">{pl.boxes} boxes · {pl.layers}</span>
+                              <span className="mono text-cyan-300 font-bold">{pl.mu}</span>
+                              <span className="text-text-3 text-[10px] ml-auto">
+                                {items.length} SKUs · {pl.totalUnits || pl.qty || 16} units total
+                              </span>
                             </button>
 
                             {isOpen && (
-                              <div className="p-2 pt-1 border-t border-border">
-                                <dl className="grid grid-cols-[88px_1fr] gap-x-2 gap-y-0.5 text-[11px]">
-                                  <dt className="text-text-3">SKU</dt>
-                                  <dd className="text-text-1"><span className="mono">{pl.sku}</span> — {pl.skuName}</dd>
-                                  <dt className="text-text-3">Quantity</dt>
-                                  <dd className="mono text-text-1">{pl.qty}</dd>
-                                  <dt className="text-text-3">Lot</dt>
-                                  <dd className="mono text-text-1">{pl.lot}</dd>
-                                  <dt className="text-text-3">Status</dt>
-                                  <dd className={pl.status === 'Active' ? 'text-live' : 'text-warn'}>{pl.status}</dd>
-                                </dl>
-
-                                <div className="flex gap-1 flex-wrap mt-2">
-                                  {Array.from({ length: pl.boxes }).map((_, bIdx) => (
-                                    <span key={bIdx} className="w-3.5 h-2 rounded-[2px] bg-live-dim border border-live/50" />
+                              <div className="p-2 pt-1 border-t border-border space-y-2">
+                                <div className="text-[10px] text-text-3">
+                                  Box contents: Mixed pack of sequential variants (5–6 units per size)
+                                </div>
+                                <div className="space-y-1.5">
+                                  {items.map((it: any, itIdx: number) => (
+                                    <div key={itIdx} className="p-1.5 bg-surface-2/60 rounded border border-border-subtle text-[11px]">
+                                      <div className="flex items-center justify-between">
+                                        <span className="mono font-semibold text-text-1">{it.sku}</span>
+                                        <span className="mono text-live font-semibold">{it.qty} units</span>
+                                      </div>
+                                      <div className="text-text-2 text-[10px] truncate">{it.skuName}</div>
+                                      <div className="flex items-center justify-between text-[10px] text-text-3 mt-1">
+                                        <span>Parent: <span className="mono">{it.parentSku}</span> · Lot {it.lot}</span>
+                                        <span className={it.status === 'Active' ? 'text-live' : 'text-warn'}>{it.status}</span>
+                                      </div>
+                                      {/* Visual unit dots for the pack */}
+                                      <div className="flex gap-1 mt-1.5">
+                                        {Array.from({ length: it.qty }).map((_, dotIdx) => (
+                                          <span key={dotIdx} className="w-2.5 h-2.5 rounded-[2px] bg-live/25 border border-live/60 flex-none" />
+                                        ))}
+                                      </div>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
