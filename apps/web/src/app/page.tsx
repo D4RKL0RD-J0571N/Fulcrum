@@ -44,7 +44,8 @@ const CONFIG = {
   aislesAfter: [10, 16],
   voids: ["EJ08", "ER12", "EC15"],
   bayWidthM: 1.2,
-  platformsPerLocation: 2
+  platformsPerLocation: 2, // 2 platforms per location/level
+  maxMusPerPlatform: 9 // up to 9 MUs per platform -> 18 MUs per rack level
 };
 
 const DATA = {
@@ -106,23 +107,68 @@ const DATA = {
       platforms: [
         {
           name: "Platform 1 (Level A Ground Pull-out)",
-          mu: "502900",
-          totalUnits: 16,
+          maxMuCapacity: 9,
+          muCount: 9,
+          totalUnits: 98,
           isMixed: true,
-          items: [
-            { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
-            { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" },
-            { sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" }
+          mu: "502900",
+          mus: [
+            {
+              mu: "502900",
+              totalUnits: 16,
+              items: [
+                { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
+                { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" },
+                { sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" }
+              ]
+            },
+            {
+              mu: "502901",
+              totalUnits: 11,
+              items: [
+                { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
+                { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C04", status: "Active" }
+              ]
+            },
+            {
+              mu: "502902",
+              totalUnits: 10,
+              items: [
+                { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "A93", status: "Active" },
+                { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A93", status: "Active" }
+              ]
+            },
+            { mu: "502903", totalUnits: 12, items: [{ sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }, { sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }] },
+            { mu: "502904", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "A94", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "A94", status: "Active" }] },
+            { mu: "502905", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "A95", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A95", status: "Active" }] },
+            { mu: "502906", totalUnits: 10, items: [{ sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C05", status: "Active" }, { sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C05", status: "Active" }] },
+            { mu: "502907", totalUnits: 10, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A96", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "A96", status: "Active" }] },
+            { mu: "502908", totalUnits: 8, items: [{ sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 8, lot: "C06", status: "Active" }] }
           ]
         },
         {
           name: "Platform 2 (Inner Cage)",
-          mu: "101003",
-          totalUnits: 12,
+          maxMuCapacity: 9,
+          muCount: 8,
+          totalUnits: 84,
           isMixed: true,
-          items: [
-            { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "B17", status: "Reserved" },
-            { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }
+          mu: "101003",
+          mus: [
+            {
+              mu: "101003",
+              totalUnits: 12,
+              items: [
+                { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "B17", status: "Reserved" },
+                { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }
+              ]
+            },
+            { mu: "101004", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B18", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "B18", status: "Active" }] },
+            { mu: "101005", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "B19", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "B19", status: "Active" }] },
+            { mu: "101006", totalUnits: 10, items: [{ sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C07", status: "Active" }, { sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 5, lot: "C07", status: "Active" }] },
+            { mu: "101007", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B20", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "B20", status: "Active" }] },
+            { mu: "101008", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "B21", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "B21", status: "Active" }] },
+            { mu: "101009", totalUnits: 10, items: [{ sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C08", status: "Active" }, { sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C08", status: "Active" }] },
+            { mu: "101010", totalUnits: 10, items: [{ sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 5, lot: "C09", status: "Active" }, { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B22", status: "Active" }] }
           ]
         }
       ]
@@ -183,13 +229,25 @@ function getMusInBay(bc: string) {
     const code = locCode(p.row, p.bay, lvl.id);
     const plats = platformsOf(code);
     plats.forEach((pl: any) => {
-      mus.push({
-        mu: pl.mu,
-        level: lvl.id,
-        skuCount: pl.items?.length || 1,
-        totalUnits: pl.totalUnits || pl.qty || 15,
-        isMixed: pl.isMixed ?? true
-      });
+      if (pl.mus && Array.isArray(pl.mus)) {
+        pl.mus.forEach((m: any) => {
+          mus.push({
+            mu: m.mu,
+            level: lvl.id,
+            skuCount: m.items?.length || 2,
+            totalUnits: m.totalUnits || 11,
+            isMixed: true
+          });
+        });
+      } else {
+        mus.push({
+          mu: pl.mu,
+          level: lvl.id,
+          skuCount: pl.items?.length || 1,
+          totalUnits: pl.totalUnits || pl.qty || 15,
+          isMixed: pl.isMixed ?? true
+        });
+      }
     });
   });
   return mus;
@@ -218,25 +276,43 @@ function platformsOf(code: string) {
   if (cur) return cur.platforms;
   const facts = locFacts(code);
   const out = [];
-  for (let i = 0; i < facts.platforms; i++) {
-    const h = hash01(code + "/p" + i);
-    // 6-digit numeric MU (e.g. 502900, 101003)
-    const muNum = 100000 + Math.floor(h * 899999);
-    // Mixed items: 2 to 3 sequential variants from parent, 5 to 6 units each
-    const sku1 = DATA.skuPool[0];
-    const sku2 = DATA.skuPool[1];
-    const qty1 = 5 + Math.floor(h * 2); // 5 or 6 units
-    const qty2 = 5 + Math.floor((1 - h) * 2); // 5 or 6 units
+
+  // 2 platforms per level/location
+  for (let pIdx = 0; pIdx < CONFIG.platformsPerLocation; pIdx++) {
+    const h = hash01(code + "/p" + pIdx);
+    // Up to 9 MUs per platform (e.g., 6 to 9 boxes)
+    const muCount = 6 + Math.floor(h * 4); // 6, 7, 8, or 9 MUs
+    const musOnPlatform = [];
+
+    for (let mIdx = 0; mIdx < muCount; mIdx++) {
+      const mh = hash01(code + "/p" + pIdx + "/m" + mIdx);
+      const muNum = 100000 + Math.floor(mh * 899999);
+      const skuIdx = Math.floor(mh * (DATA.skuPool.length - 1));
+      const sku1 = DATA.skuPool[skuIdx];
+      const sku2 = DATA.skuPool[skuIdx + 1];
+      const qty1 = 5 + Math.floor(mh * 2);
+      const qty2 = 5 + Math.floor((1 - mh) * 2);
+
+      musOnPlatform.push({
+        mu: String(muNum),
+        totalUnits: qty1 + qty2,
+        isMixed: true,
+        items: [
+          { sku: sku1.sku, skuName: sku1.name, parentSku: sku1.parent, qty: qty1, lot: "A92", status: "Active" },
+          { sku: sku2.sku, skuName: sku2.name, parentSku: sku2.parent, qty: qty2, lot: "A92", status: "Active" }
+        ]
+      });
+    }
 
     out.push({
-      name: "Platform " + (i + 1),
-      mu: String(muNum),
-      totalUnits: qty1 + qty2,
-      isMixed: true,
-      items: [
-        { sku: sku1.sku, skuName: sku1.name, parentSku: sku1.parent, qty: qty1, lot: "A92", status: "Active" },
-        { sku: sku2.sku, skuName: sku2.name, parentSku: sku2.parent, qty: qty2, lot: "A92", status: "Active" }
-      ]
+      name: "Platform " + (pIdx + 1) + (pIdx === 0 ? " (Front Pull-out)" : " (Rear/Inner)"),
+      maxMuCapacity: CONFIG.maxMusPerPlatform,
+      muCount: musOnPlatform.length,
+      mus: musOnPlatform,
+      // For summary display:
+      mu: musOnPlatform[0]?.mu || "101003",
+      totalUnits: musOnPlatform.reduce((sum, m) => sum + m.totalUnits, 0),
+      items: musOnPlatform[0]?.items || []
     });
   }
   return out;
@@ -958,14 +1034,20 @@ export default function OperationalOverviewPage() {
                   </div>
 
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium">
-                      Platforms at {selectedLoc}
+                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium flex items-center justify-between">
+                      <span>Platforms at {selectedLoc}</span>
+                      <span className="mono text-[10px] text-text-3 font-normal">Cap: 9 MUs / platform (18 / level)</span>
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {platformsOf(selectedLoc).map((pl: any, i: number) => {
                         const isOpen = openPlatforms[i] ?? (i === 0);
-                        const items = pl.items || [{ sku: pl.sku, skuName: pl.skuName, parentSku: pl.parentSku, qty: pl.qty, lot: pl.lot, status: pl.status }];
+                        const musList = pl.mus || [{
+                          mu: pl.mu,
+                          totalUnits: pl.totalUnits || 16,
+                          items: pl.items || []
+                        }];
+
                         return (
                           <div key={i} className="border border-border rounded overflow-hidden bg-bg-1">
                             <button
@@ -974,33 +1056,37 @@ export default function OperationalOverviewPage() {
                             >
                               <ChevronRight className={`h-3 w-3 text-text-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                               <span className="font-semibold text-text-1">{pl.name}</span>
-                              <span className="mono text-cyan-300 font-bold">{pl.mu}</span>
+                              <span className="mono text-cyan-300 font-bold">{musList.length} / 9 MUs</span>
                               <span className="text-text-3 text-[10px] ml-auto">
-                                {items.length} SKUs · {pl.totalUnits || pl.qty || 16} units total
+                                {pl.totalUnits || 85} units total
                               </span>
                             </button>
 
                             {isOpen && (
                               <div className="p-2 pt-1 border-t border-border space-y-2">
                                 <div className="text-[10px] text-text-3">
-                                  Box contents: Mixed pack of sequential variants (5–6 units per size)
+                                  Boxes on platform ({musList.length} of 9 positions occupied):
                                 </div>
-                                <div className="space-y-1.5">
-                                  {items.map((it: any, itIdx: number) => (
-                                    <div key={itIdx} className="p-1.5 bg-surface-2/60 rounded border border-border-subtle text-[11px]">
+                                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                                  {musList.map((mItem: any, mIdx: number) => (
+                                    <div key={mIdx} className="p-1.5 bg-surface-2/60 rounded border border-border-subtle text-[11px]">
                                       <div className="flex items-center justify-between">
-                                        <span className="mono font-semibold text-text-1">{it.sku}</span>
-                                        <span className="mono text-live font-semibold">{it.qty} units</span>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-text-3 text-[10px]">Pos {mIdx + 1}:</span>
+                                          <span className="mono font-bold text-cyan-300">MU {mItem.mu}</span>
+                                        </div>
+                                        <span className="mono text-live text-[10px] font-semibold">{mItem.totalUnits || 12} units</span>
                                       </div>
-                                      <div className="text-text-2 text-[10px] truncate">{it.skuName}</div>
-                                      <div className="flex items-center justify-between text-[10px] text-text-3 mt-1">
-                                        <span>Parent: <span className="mono">{it.parentSku}</span> · Lot {it.lot}</span>
-                                        <span className={it.status === 'Active' ? 'text-live' : 'text-warn'}>{it.status}</span>
-                                      </div>
-                                      {/* Visual unit dots for the pack */}
-                                      <div className="flex gap-1 mt-1.5">
-                                        {Array.from({ length: it.qty }).map((_, dotIdx) => (
-                                          <span key={dotIdx} className="w-2.5 h-2.5 rounded-[2px] bg-live/25 border border-live/60 flex-none" />
+
+                                      <div className="mt-1 space-y-1">
+                                        {mItem.items?.map((it: any, itIdx: number) => (
+                                          <div key={itIdx} className="flex items-center justify-between text-[10px] bg-bg-0/60 p-1 rounded">
+                                            <div className="truncate max-w-[170px]" title={it.skuName}>
+                                              <span className="mono font-semibold text-text-1 mr-1">{it.sku}</span>
+                                              <span className="text-text-3">{it.skuName}</span>
+                                            </div>
+                                            <span className="mono text-live font-semibold flex-none">{it.qty}u</span>
+                                          </div>
                                         ))}
                                       </div>
                                     </div>
