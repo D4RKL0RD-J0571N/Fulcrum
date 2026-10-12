@@ -52,8 +52,13 @@ export class PureTypeScriptSimulationEngine implements SimulationEngineService {
     const orders = [...snapshot.workload.orders].sort((a, b) => a.arrival_time - b.arrival_time);
     const locationsMap = new Map(snapshot.locations.map(l => [l.id, l]));
 
-    // Inventory map by SKU -> inventory item
-    const inventoryMap = new Map(snapshot.inventory.map(i => [i.sku, i]));
+    // Inventory map by SKU -> first matching inventory item with positive balance
+    const inventoryMap = new Map<string, typeof snapshot.inventory[0]>();
+    for (const item of snapshot.inventory) {
+      if (!inventoryMap.has(item.sku) && item.quantity_units > 0) {
+        inventoryMap.set(item.sku, item);
+      }
+    }
 
     let virtualClock = snapshot.config.start_time_seconds;
     let lastVisitedMuId: string | null = null;
