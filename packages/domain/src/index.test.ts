@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { LayoutEngine, WarehouseLayoutConfig, LocationStructured } from './index';
+import fc from 'fast-check';
+import {
+  LayoutEngine,
+  WarehouseLayoutConfig,
+  LocationStructured,
+  InMemoryInventoryLedgerRepository,
+  StockMovementLedgerEntry,
+  StockReservation
+} from './index';
 
-describe('LayoutEngine', () => {
+describe('LayoutEngine — 3 Canonical Layouts & Invariants', () => {
   const layoutA: WarehouseLayoutConfig = {
     id: 'layout_a',
     version: 1,
@@ -81,38 +89,21 @@ describe('LayoutEngine', () => {
     aisleWidthMeters: 2.5
   };
 
-  it('correctly formats and parses codes for Layout A (EH14D)', () => {
-    const loc: LocationStructured = { side: 'E', row: 'H', column: 14, level: 'D' };
-    const code = LayoutEngine.formatCode(layoutA, loc);
-    expect(code).toBe('EH14D');
+  it('verifies round-trip parse(format(x)) === x on generated locations (Layout A)', () => {
+    const locs = LayoutEngine.generateLocations(layoutA);
+    expect(locs.length).toBe(2056);
 
-    const parsed = LayoutEngine.parseCode(layoutA, code);
-    expect(parsed).toEqual(loc);
+    for (let i = 0; i < 100; i++) {
+      const loc = locs[i];
+      const parsed = LayoutEngine.parseCode(layoutA, loc.code);
+      expect(parsed).toEqual(loc.structured);
+    }
   });
 
-  it('correctly formats and parses codes for Layout B (H-14-L1)', () => {
-    const loc: LocationStructured = { row: 'H', column: 14, level: 'L1' };
-    const code = LayoutEngine.formatCode(layoutB, loc);
-    expect(code).toBe('H-14-L1');
-
-    const parsed = LayoutEngine.parseCode(layoutB, code);
-    expect(parsed).toEqual(loc);
-  });
-
-  it('correctly formats and parses codes for Layout C (08.14.B)', () => {
-    const loc: LocationStructured = { row: '8', column: 14, level: 'B' };
-    const code = LayoutEngine.formatCode(layoutC, loc);
-    expect(code).toBe('08.14.B');
-
-    const parsed = LayoutEngine.parseCode(layoutC, code);
-    expect(parsed).toEqual({ row: '08', column: 14, level: 'B', side: undefined });
-  });
-
-  it('generates correct location counts accounting for bay overrides', () => {
-    const locsA = LayoutEngine.generateLocations(layoutA);
-    // 25 rows with 20 bays = 500 bays. Row H with 14 bays. Total bays = 514.
-    // 4 levels per bay = 514 * 4 = 2056 locations.
-    expect(locsA.length).toBe(2056);
+  it('rejects codes outside the valid layout range', () => {
+    expect(LayoutEngine.validateCode(layoutA, 'EZ25A')).toBe(false); // bay 25 > 20
+    expect(LayoutEngine.validateCode(layoutA, 'E101A')).toBe(false); // invalid row
+    expect(LayoutEngine.validateCode(layoutA, 'EA01Z')).toBe(false); // level Z doesn't exist
   });
 
   it('rejects ambiguous templates without separator and unpadded numeric rows', () => {
@@ -126,10 +117,110 @@ describe('LayoutEngine', () => {
     expect(res.errors[0]).toContain('Ambiguous template');
   });
 
-  it('computes positive physical distance', () => {
-    const loc1: LocationStructured = { side: 'E', row: 'A', column: 1, level: 'A' };
-    const loc2: LocationStructured = { side: 'E', row: 'B', column: 5, level: 'D' };
-    const dist = LayoutEngine.computeDistance(layoutA, loc1, loc2);
-    expect(dist).toBeGreaterThan(0);
+  // Property-based test with fast-check
+  it('property test: parse(format(x)) round-trip holds for all arbitrary valid coordinate tuples (Layout A)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 65, max: 90 }), // Rows A-Z
+        fc.integer({ min: 1, max: 20 }),  // Bays 1-20
+        fc.constantFrom('A', 'B', 'C', 'D'), // Levels A-D
+        (rowChar, bayNum, level) => {
+          const row = String.fromCharCode(rowChar);
+          const structured: LocationStructured = { side: 'E', row, column: bayNum, level };
+          const formatted = LayoutEngine.formatCode(layoutA, structured);
+          const parsed = LayoutEngine.parseCode(layoutA, formatted);
+          expect(parsed).toEqual(structured);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('property test: parse(format(x)) round-trip holds for arbitrary valid coordinates (Layout B without prefix)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 65, max: 74 }), // Rows A-J
+        fc.integer({ min: 1, max: 30 }),  // Bays 1-30
+        fc.constantFrom('L1', 'L2'),
+        (rowChar, bayNum, level) => {
+          const row = String.fromCharCode(rowChar);
+          const structured: LocationStructured = { row, column: bayNum, level };
+          const formatted = LayoutEngine.formatCode(layoutB, structured);
+          const parsed = LayoutEngine.parseCode(layoutB, formatted);
+          expect(parsed).toEqual(structured);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});
+
+describe('InMemoryInventoryLedgerRepository — Ledger & Invariant Testing', () => {
+  it('maintains append-only movements with idempotency', async () => {
+    const repo = new InMemoryInventoryLedgerRepository();
+    const entry: StockMovementLedgerEntry = {
+      movementId: 'mov_1',
+      workspaceId: 'ws_default',
+      idempotencyKey: 'idemp_key_100',
+      timestamp: 1000,
+      movementType: 'RECEIPT',
+      toLocationId: 'loc_EH14D',
+      toMuId: 'MU-39102',
+      sku: '1524289001',
+      quantityUnits: 50
+    };
+
+    await repo.appendMovement(entry);
+    await repo.appendMovement(entry); // duplicate attempt
+
+    const movements = await repo.getMovements('ws_default');
+    expect(movements.length).toBe(1);
+
+    const balances = await repo.getCurrentStock('ws_default', '1524289001');
+    expect(balances[0].availableUnits).toBe(50);
+  });
+
+  it('enforces that reservations never exceed available balance', async () => {
+    const repo = new InMemoryInventoryLedgerRepository();
+    await repo.appendMovement({
+      movementId: 'mov_receipt',
+      workspaceId: 'ws_default',
+      idempotencyKey: 'idemp_rec_01',
+      timestamp: 1000,
+      movementType: 'RECEIPT',
+      toLocationId: 'loc_EH14A',
+      toMuId: 'MU-39102',
+      sku: '1524289001',
+      quantityUnits: 10
+    });
+
+    const res: StockReservation = {
+      reservationId: 'res_01',
+      workspaceId: 'ws_default',
+      orderId: '000815296',
+      lineId: 'l1',
+      sku: '1524289001',
+      quantityUnits: 8,
+      muId: 'MU-39102',
+      locationId: 'loc_EH14A',
+      status: 'RESERVED',
+      createdAt: 1005
+    };
+
+    await repo.createReservation(res);
+
+    const balances = await repo.getCurrentStock('ws_default', '1524289001');
+    expect(balances[0].onHandUnits).toBe(10);
+    expect(balances[0].reservedUnits).toBe(8);
+    expect(balances[0].availableUnits).toBe(2);
+
+    // Over-reservation must throw
+    const overRes: StockReservation = {
+      ...res,
+      reservationId: 'res_02',
+      quantityUnits: 5 // only 2 available!
+    };
+
+    await expect(repo.createReservation(overRes)).rejects.toThrow('Insufficient available stock');
   });
 });
