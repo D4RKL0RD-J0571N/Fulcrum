@@ -6,7 +6,9 @@ import {
   LocationStructured,
   InMemoryInventoryLedgerRepository,
   StockMovementLedgerEntry,
-  StockReservation
+  StockReservation,
+  normalizeWmsOrder,
+  normalizeErpInventory
 } from './index';
 
 describe('LayoutEngine — 3 Canonical Layouts & Invariants', () => {
@@ -222,5 +224,35 @@ describe('InMemoryInventoryLedgerRepository — Ledger & Invariant Testing', () 
     };
 
     await expect(repo.createReservation(overRes)).rejects.toThrow('Insufficient available stock');
+  });
+
+  describe('External WMS and ERP Connectors', () => {
+    it('normalizes external WMS orders correctly', () => {
+      const normalized = normalizeWmsOrder({
+        order_reference: '815296',
+        order_date: '2026-10-12',
+        priority: 'URGENT',
+        lines: [{ line_number: 1, item_code: '1524289001', requested_quantity: 2 }]
+      }, 100);
+
+      expect(normalized.order_id).toBe('000815296');
+      expect(normalized.arrival_time).toBe(100);
+      expect(normalized.priority).toBe('HIGH');
+      expect(normalized.items[0].sku).toBe('1524289001');
+    });
+
+    it('normalizes external ERP inventory balance correctly', () => {
+      const normalized = normalizeErpInventory({
+        container_id: '502900',
+        storage_bin: 'EH14A',
+        material_number: '1524289001',
+        unrestricted_stock: 6
+      });
+
+      expect(normalized.mu_id).toBe('502900');
+      expect(normalized.location_id).toBe('loc_EH14A');
+      expect(normalized.sku).toBe('1524289001');
+      expect(normalized.quantity_units).toBe(6);
+    });
   });
 });

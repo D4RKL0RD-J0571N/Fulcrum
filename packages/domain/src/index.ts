@@ -470,3 +470,5 @@ export class InMemoryWarehouseLayoutRepository implements WarehouseLayoutReposit
     return this.layouts.filter(l => l.workspaceId === workspaceId).sort((a, b) => b.version - a.version);
   }
 }
+
+export * from './connectors';
