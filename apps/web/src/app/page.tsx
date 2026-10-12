@@ -155,6 +155,27 @@ function bayOf(code: string) {
   return p ? bayCode(p.row, p.bay) : null;
 }
 
+/* Get all MUs stored across the levels of a rack bay */
+function getMusInBay(bc: string) {
+  const p = parseLoc(bc + 'A');
+  if (!p) return [];
+  const mus: { mu: string; level: string; sku: string; skuName: string; units: number }[] = [];
+  CONFIG.levels.forEach(lvl => {
+    const code = locCode(p.row, p.bay, lvl.id);
+    const plats = platformsOf(code);
+    plats.forEach((pl: any) => {
+      mus.push({
+        mu: pl.mu,
+        level: lvl.id,
+        sku: pl.sku,
+        skuName: pl.skuName,
+        units: pl.qty
+      });
+    });
+  });
+  return mus;
+}
+
 function locFacts(code: string) {
   const p = parseLoc(code);
   if (!p) return { occ: 50, platforms: 2, access: 'manual' as const, levelDef: CONFIG.levels[0] };
@@ -221,6 +242,7 @@ export default function OperationalOverviewPage() {
   const [searchVal, setSearchVal] = useState<string>("");
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [highlightedOrder, setHighlightedOrder] = useState<string | null>(null);
+  const [hoveredBay, setHoveredBay] = useState<string | null>(null);
   const [simRun, setSimRun] = useState<number>(0);
   const [simBusy, setSimBusy] = useState<boolean>(false);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -306,12 +328,41 @@ export default function OperationalOverviewPage() {
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
     const q = searchVal.trim().toUpperCase();
+
+    // Check if query is an MU code (e.g. MU-39102)
+    if (q.startsWith('MU-') || q.startsWith('MU')) {
+      const muTarget = q.startsWith('MU-') ? q : `MU-${q.slice(2)}`;
+      // Search curated first
+      if (muTarget === 'MU-39102' || muTarget === 'MU-39103') {
+        setSearchErr(null);
+        selectLocation('EH14D');
+        (e.target as HTMLInputElement).blur();
+        return;
+      }
+      // Scan bays for matching generated MU
+      for (const r of CONFIG.rows) {
+        for (let b = 1; b <= r.bays; b++) {
+          const bc = bayCode(r.id, b);
+          const mus = getMusInBay(bc);
+          if (mus.some(m => m.mu === muTarget)) {
+            setSearchErr(null);
+            selectLocation(`${bc}A`);
+            (e.target as HTMLInputElement).blur();
+            return;
+          }
+        }
+      }
+      setSearchErr(`MU "${muTarget}" not found in facility.`);
+      setTimeout(() => setSearchErr(null), 3000);
+      return;
+    }
+
     if (parseLoc(q)) {
       setSearchErr(null);
       selectLocation(q);
       (e.target as HTMLInputElement).blur();
     } else {
-      setSearchErr(`No location matches "${q}" — codes look like EH14D (side, row, bay 01–20, level A–D).`);
+      setSearchErr(`No location matches "${q}" — try location codes (EH14D) or MU IDs (MU-39102).`);
       setTimeout(() => setSearchErr(null), 3000);
     }
   };
@@ -619,6 +670,8 @@ export default function OperationalOverviewPage() {
                           <g
                             key={bc}
                             onClick={() => selectLocation(bc)}
+                            onMouseEnter={() => setHoveredBay(bc)}
+                            onMouseLeave={() => setHoveredBay(null)}
                             className="cursor-pointer group"
                             role="gridcell"
                             aria-label={`Bay ${bc}`}
@@ -662,6 +715,29 @@ export default function OperationalOverviewPage() {
                   );
                 })}
               </svg>
+
+              {/* Hovered Bay MU Inspector Tooltip */}
+              {hoveredBay && (
+                <div className="absolute top-2 right-4 bg-surface-3/95 backdrop-blur border border-border-strong rounded p-2.5 shadow-xl text-xs z-30 max-w-[280px]">
+                  <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-border">
+                    <span className="font-semibold text-text-1">Rack Position <span className="mono text-live">{hoveredBay}</span></span>
+                    <span className="text-[10px] text-text-3 font-mono">{getMusInBay(hoveredBay).length} MUs</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                    {getMusInBay(hoveredBay).map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-bg-1/70 px-1.5 py-1 rounded text-[11px] font-mono">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-text-3 font-normal text-[10px]">Lvl {item.level}</span>
+                          <span className="text-cyan-300 font-semibold">{item.mu}</span>
+                        </div>
+                        <span className="text-text-2 text-[10px] truncate max-w-[110px]" title={item.skuName}>
+                          {item.sku}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Stale Badge on Zone M */}
               <div
@@ -794,8 +870,11 @@ export default function OperationalOverviewPage() {
                 {/* DRAWER BODY */}
                 <div className="flex-1 overflow-y-auto p-3 min-h-0 space-y-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium">
-                      Rack elevation — bay {bayCode(parsedSelected.row, parsedSelected.bay)}
+                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium flex items-center justify-between">
+                      <span>Rack elevation — bay {bayCode(parsedSelected.row, parsedSelected.bay)}</span>
+                      <span className="mono text-[10px] text-cyan-400 font-normal">
+                        {getMusInBay(bayCode(parsedSelected.row, parsedSelected.bay)).length} MUs in rack
+                      </span>
                     </div>
 
                     <div className="flex flex-col gap-1">
@@ -832,6 +911,26 @@ export default function OperationalOverviewPage() {
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  {/* Rack Position MUs Overview Card */}
+                  <div className="p-2.5 rounded border border-border bg-surface-2/60">
+                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-semibold flex items-center justify-between">
+                      <span>Boxes / MUs in this rack position</span>
+                      <span className="mono text-live text-[10px]">Bay {bayCode(parsedSelected.row, parsedSelected.bay)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {getMusInBay(bayCode(parsedSelected.row, parsedSelected.bay)).map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-1 border border-border-strong text-[11px] mono text-text-1"
+                        >
+                          <span className="text-text-3 text-[10px]">L{item.level}:</span>
+                          <span className="text-cyan-300 font-bold">{item.mu}</span>
+                          <span className="text-text-3 text-[9px]">({item.units}u)</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
