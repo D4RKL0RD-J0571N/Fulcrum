@@ -17,18 +17,22 @@ export type SimulationLocation = z.infer<typeof SimulationLocationSchema>;
 export const SimulationInventoryItemSchema = z.object({
   mu_id: z.string(),
   location_id: z.string(),
-  sku: z.string(),
-  quantity: z.number().int().nonnegative()
+  platform_id: z.string().optional(),
+  sku: z.string(), // e.g. "1524289001"
+  parent_sku: z.string().optional(), // e.g. "1524289"
+  quantity_units: z.number().int().nonnegative() // each/single units
 });
 export type SimulationInventoryItem = z.infer<typeof SimulationInventoryItemSchema>;
 
 export const SimulationOrderItemSchema = z.object({
-  sku: z.string(),
-  quantity: z.number().int().positive()
+  line_id: z.string(),
+  sku: z.string(), // e.g. "1524289001"
+  quantity_units: z.number().int().positive().default(1) // piece pick
 });
+export type SimulationOrderItem = z.infer<typeof SimulationOrderItemSchema>;
 
 export const SimulationOrderSchema = z.object({
-  order_id: z.string(),
+  order_id: z.string(), // e.g. "000815296" (9-digit zero-padded)
   arrival_time: z.number().int().nonnegative(),
   deadline: z.number().int().positive(),
   priority: z.enum(['CRITICAL', 'HIGH', 'STANDARD', 'LOW']).default('STANDARD'),
@@ -52,7 +56,11 @@ export const SimulationResourceSchema = z.object({
 });
 export type SimulationResource = z.infer<typeof SimulationResourceSchema>;
 
-export const SimulationStrategySchema = z.enum(['BASELINE', 'CONGESTION_AWARE']);
+export const SimulationStrategySchema = z.enum([
+  'BASELINE', // discrete single-order picking (picker visits MU, returns to pack, visits same MU again for next order)
+  'CONGESTION_AWARE', // batches identical MU visits across active wave orders or defers forklift moves
+  'BATCH_WAVE_ROUTING' // batch pick across orders sharing the same MU
+]);
 export type SimulationStrategy = z.infer<typeof SimulationStrategySchema>;
 
 export const SimulationRulesSchema = z.object({
@@ -60,7 +68,10 @@ export const SimulationRulesSchema = z.object({
   congestion_slowdown_factor: z.number().default(0.5),
   forklift_lockout_duration_seconds: z.number().int().default(180),
   picker_walking_speed_mps: z.number().default(1.2),
-  forklift_speed_mps: z.number().default(2.0)
+  forklift_speed_mps: z.number().default(2.0),
+  platform_draw_penalty_seconds: z.number().int().default(18), // manual extraction of level A platform/cage
+  box_shuffle_penalty_seconds: z.number().int().default(25), // moving cages/MUs to access inner one
+  piece_pick_seconds: z.number().int().default(6) // picking a single item unit
 });
 export type SimulationRules = z.infer<typeof SimulationRulesSchema>;
 
@@ -98,7 +109,11 @@ export const SimulationSummaryMetricsSchema = z.object({
   average_order_cycle_time_seconds: z.number(),
   picker_utilization_ratio: z.number(),
   forklift_contention_events: z.number().int(),
-  total_congestion_delay_seconds: z.number().int()
+  total_congestion_delay_seconds: z.number().int(),
+  // MU specific metrics
+  redundant_mu_trips: z.number().int(), // trips to the same MU in consecutive orders that could have been batched
+  platform_extraction_events: z.number().int(), // count of Level A manual pull-outs
+  cage_shuffle_events: z.number().int() // count of cage relocations to reach target MU
 });
 export type SimulationSummaryMetrics = z.infer<typeof SimulationSummaryMetricsSchema>;
 

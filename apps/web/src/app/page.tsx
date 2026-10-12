@@ -71,38 +71,41 @@ const DATA = {
     seed: 48213,
     horizonH: 8,
     completed: "Completed 2 min ago",
-    proposal: "Proposal 4a",
+    proposal: "Proposal 4a (Batch MU Wave)",
     metrics: [
-      { name: "Picking distance", unit: "m", base: "4,120", prop: "3,680", delta: "-10.7%" },
-      { name: "Expected completion", unit: "", base: "15:30", prop: "14:45", delta: "-45 min" },
-      { name: "Late orders", unit: "orders", base: "18", prop: "6", delta: "-12" },
-      { name: "Workload balance", unit: "index 0–1", base: "0.71", prop: "0.88", delta: "+0.17" }
+      { name: "Picking distance", unit: "m", base: "4,120", prop: "2,740", delta: "-33.5%" },
+      { name: "Redundant MU trips", unit: "trips", base: "42", prop: "0", delta: "-42 trips" },
+      { name: "Platform draw-outs (Lvl A)", unit: "draws", base: "68", prop: "24", delta: "-44 draws" },
+      { name: "Cage shuffles", unit: "moves", base: "19", prop: "5", delta: "-14 moves" },
+      { name: "Expected completion", unit: "", base: "15:30", prop: "14:15", delta: "-75 min" },
+      { name: "Late orders", unit: "orders", base: "18", prop: "2", delta: "-16" },
+      { name: "Workload balance", unit: "index 0–1", base: "0.71", prop: "0.89", delta: "+0.18" }
     ]
   },
   queue: {
     shown: 6,
     total: 1842,
     rows: [
-      { prio: 1, id: "ORD-8812", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"] },
-      { prio: 1, id: "ORD-8813", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"] },
-      { prio: 2, id: "ORD-8814", time: "23 min", state: "Waiting stock", source: "Transfer MKT-02 · ETA 14:10", locs: ["EH14D"] },
-      { prio: 2, id: "ORD-8815", time: "31 min", state: "Picking", source: "WH-01 stock", locs: ["EH14B"] },
-      { prio: 3, id: "ORD-8816", time: "48 min", state: "Allocated", source: "Production line P2", locs: ["EK03A"] },
-      { prio: 3, id: "ORD-8817", time: "1 h 12 min", state: "Queued", source: "WH-01 stock", locs: ["EM09B"] }
+      { prio: 1, id: "000815296", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289001 S)", mu: "MU-39102" },
+      { prio: 1, id: "000815297", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289002 M)", mu: "MU-39102" },
+      { prio: 2, id: "000815298", time: "23 min", state: "Waiting stock", source: "Transfer MKT-02 · ETA 14:10", locs: ["EH14D"], itemsCount: "4 lines · 6 units", mu: "MU-39103" },
+      { prio: 2, id: "000815299", time: "31 min", state: "Picking", source: "WH-01 stock", locs: ["EH14B"], itemsCount: "1 line · 2 units (1524289003 L)", mu: "MU-39102" },
+      { prio: 3, id: "000815300", time: "48 min", state: "Allocated", source: "Production line P2", locs: ["EK03A"], itemsCount: "12 lines · 14 units", mu: "MU-38140" },
+      { prio: 3, id: "000815301", time: "1 h 12 min", state: "Queued", source: "WH-01 stock", locs: ["EM09B"], itemsCount: "1 line · 1 unit", mu: "MU-38290" }
     ]
   },
   ai: {
-    observation: "Congestion in bay EH14: scheduled forklift replenishment at EH14D blocks manual picks at EH14A–C between 13:00 and 14:00. 28 orders affected, average added wait 6.2 min.",
-    evidence: ["EH14D", "EH14A", "EH14B", "EH14C", "ORD-8812", "ORD-8814", "13:00–14:00", "SIM-2041"],
-    plan: "Defer EH14D replenishment to 14:00–14:30 and re-route 9 picks to EC07A.",
-    affectedOrders: 28
+    observation: "Redundant trip alert: Orders 000815296 and 000815297 both request single units from parent SKU 1524289 stored in MU-39102 (Bay EH14, Platform 1). Under discrete picking, the picker walks to EH14, draws Level A cage, walks to pack station, then immediately walks back to EH14 to draw the same cage for 000815297.",
+    evidence: ["EH14D", "EH14A", "MU-39102", "000815296", "000815297", "1524289001", "1524289002", "SIM-2041"],
+    plan: "Batch-wave orders 000815296, 000815297, and 000815299 into a single MU visit at EH14 (saves 2 cage draw-outs, 180m travel, 8.4 min).",
+    affectedOrders: 3
   },
   locations: {
     "EH14D": {
       status: "Congested",
       platforms: [
-        { name: "Platform 1", mu: "MU-39102", boxes: 9, layers: "3 layers of 3", sku: "WH101", skuName: "Warehouse bin 12 L", qty: 216, lot: "A92", status: "Active" },
-        { name: "Platform 2", mu: "MU-39103", boxes: 6, layers: "2 layers of 3", sku: "WH205", skuName: "Cable kit 3 m", qty: 120, lot: "B17", status: "Reserved" }
+        { name: "Platform 1 (Level A Ground Pull-out)", mu: "MU-39102", boxes: 9, layers: "3 layers of 3", sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 24, lot: "A92", status: "Active" },
+        { name: "Platform 2 (Inner Cage)", mu: "MU-39103", boxes: 6, layers: "2 layers of 3", sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 18, lot: "B17", status: "Reserved" }
       ]
     }
   } as Record<string, any>,
@@ -112,11 +115,11 @@ const DATA = {
     blocked: ["EI04"]
   },
   skuPool: [
-    { sku: "WH101", name: "Warehouse bin 12 L" },
-    { sku: "WH205", name: "Cable kit 3 m" },
-    { sku: "WH330", name: "Packing foam 50 cm" },
-    { sku: "WH412", name: "Label roll 102 mm" },
-    { sku: "WH518", name: "Divider set 40×30" }
+    { sku: "1524289001", name: "Athletic Tee Slim — Black / S", parent: "1524289" },
+    { sku: "1524289002", name: "Athletic Tee Slim — Black / M", parent: "1524289" },
+    { sku: "1524289003", name: "Athletic Tee Slim — Black / L", parent: "1524289" },
+    { sku: "1524289004", name: "Athletic Tee Slim — Black / XL", parent: "1524289" },
+    { sku: "2841920001", name: "Cargo Trouser Utility — Navy / 30", parent: "2841920" }
   ],
   staleZone: { row: "M", text: "Zone EM — last sync 14 min ago" }
 };

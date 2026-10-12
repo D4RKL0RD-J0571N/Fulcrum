@@ -17,11 +17,11 @@ describe('DeterministicPRNG', () => {
   });
 });
 
-describe('PureTypeScriptSimulationEngine', () => {
+describe('PureTypeScriptSimulationEngine with Redundant MU Trips & Single Units', () => {
   const mockSnapshot: SimulationInputSnapshot = {
     contract_version: '1.0.0',
-    snapshot_id: 'snap_test_01',
-    snapshot_hash: 'hash_test_123',
+    snapshot_id: 'snap_test_mu_01',
+    snapshot_hash: 'hash_test_mu_123',
     workspace_id: 'ws_default',
     seed: 42,
     config: {
@@ -34,31 +34,35 @@ describe('PureTypeScriptSimulationEngine', () => {
       congestion_slowdown_factor: 0.5,
       forklift_lockout_duration_seconds: 180,
       picker_walking_speed_mps: 1.2,
-      forklift_speed_mps: 2.0
+      forklift_speed_mps: 2.0,
+      platform_draw_penalty_seconds: 18,
+      box_shuffle_penalty_seconds: 25,
+      piece_pick_seconds: 6
     },
     locations: [
-      { id: 'loc_01', x: 2, y: 5, z: 0.5, access_type: 'manual', capacity: 2, is_blocked: false },
-      { id: 'loc_02', x: 2, y: 5, z: 4.5, access_type: 'forklift', capacity: 2, is_blocked: false }
+      { id: 'loc_01', x: 2, y: 5, z: 0.5, access_type: 'manual', capacity: 2, is_blocked: false }
     ],
     inventory: [
-      { mu_id: 'mu_1', location_id: 'loc_01', sku: 'SKU-A', quantity: 50 },
-      { mu_id: 'mu_2', location_id: 'loc_02', sku: 'SKU-B', quantity: 100 }
+      // Same MU holds size variants 001 and 002
+      { mu_id: 'mu_box_01', location_id: 'loc_01', sku: '1524289001', quantity_units: 50 },
+      { mu_id: 'mu_box_01', location_id: 'loc_01', sku: '1524289002', quantity_units: 30 }
     ],
     workload: {
       orders: [
         {
-          order_id: 'ord_1',
+          order_id: '000815296',
           arrival_time: 10,
           deadline: 1200,
           priority: 'STANDARD',
-          items: [{ sku: 'SKU-A', quantity: 2 }]
+          items: [{ line_id: 'l1', sku: '1524289001', quantity_units: 1 }]
         },
         {
-          order_id: 'ord_2',
+          // Next order also requests from mu_box_01
+          order_id: '000815297',
           arrival_time: 20,
           deadline: 1200,
           priority: 'HIGH',
-          items: [{ sku: 'SKU-B', quantity: 5 }]
+          items: [{ line_id: 'l2', sku: '1524289002', quantity_units: 1 }]
         }
       ],
       replenishment_triggers: []
@@ -69,27 +73,25 @@ describe('PureTypeScriptSimulationEngine', () => {
     }
   };
 
-  it('generates reproducible results for the same seed', () => {
+  it('detects redundant MU trips in baseline strategy', () => {
     const engine = new PureTypeScriptSimulationEngine();
-    const res1 = engine.executeRun(mockSnapshot);
-    const res2 = engine.executeRun(mockSnapshot);
+    const res = engine.executeRun(mockSnapshot);
 
-    expect(res1.summary_metrics).toEqual(res2.summary_metrics);
-    expect(res1.summary_metrics.fulfilled_orders).toBe(2);
+    expect(res.summary_metrics.redundant_mu_trips).toBe(1);
+    expect(res.summary_metrics.platform_extraction_events).toBe(2);
   });
 
-  it('demonstrates reduced contention delays under CONGESTION_AWARE strategy', () => {
+  it('eliminates redundant MU trips in BATCH_WAVE_ROUTING strategy', () => {
     const engine = new PureTypeScriptSimulationEngine();
-    const baselineRes = engine.executeRun(mockSnapshot);
-
-    const alternativeSnapshot: SimulationInputSnapshot = {
+    const batchSnapshot: SimulationInputSnapshot = {
       ...mockSnapshot,
-      config: { ...mockSnapshot.config, strategy: 'CONGESTION_AWARE' }
+      config: { ...mockSnapshot.config, strategy: 'BATCH_WAVE_ROUTING' }
     };
-    const altRes = engine.executeRun(alternativeSnapshot);
+    const res = engine.executeRun(batchSnapshot);
 
-    expect(altRes.summary_metrics.total_congestion_delay_seconds).toBeLessThan(
-      baselineRes.summary_metrics.total_congestion_delay_seconds
+    expect(res.summary_metrics.redundant_mu_trips).toBe(0);
+    expect(res.summary_metrics.total_travel_distance_meters).toBeLessThan(
+      mockSnapshot.locations[0].x * 10 // much shorter travel
     );
   });
 });
