@@ -335,6 +335,7 @@ const MODES = [
 ];
 
 export default function OperationalOverviewPage() {
+  const [activeNav, setActiveNav] = useState<string>("overview");
   const [selectedLoc, setSelectedLoc] = useState<string>("EH14D");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
   const [mode, setMode] = useState<string>("density");
@@ -472,7 +473,7 @@ export default function OperationalOverviewPage() {
   const selectedBayCode = bayOf(selectedLoc);
 
   return (
-    <div className="w-[1440px] h-[1000px] overflow-hidden bg-bg-0 text-text-1 grid grid-cols-[200px_minmax(0,1fr)] select-none">
+    <div className="w-full min-h-screen bg-bg-0 text-text-1 grid grid-cols-[200px_minmax(0,1fr)] select-none">
       {/* ==================== 1. SIDEBAR ==================== */}
       <aside className="bg-surface border-r border-border flex flex-col p-3 pt-2">
         <div className="flex items-center gap-2 p-2 pb-4 text-[13px] font-semibold tracking-wide">
@@ -484,7 +485,12 @@ export default function OperationalOverviewPage() {
         </div>
 
         <nav className="flex flex-col gap-0.5">
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-live bg-live-dim font-medium text-left">
+          <button
+            onClick={() => setActiveNav('overview')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'overview' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" />
               <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" />
@@ -493,14 +499,24 @@ export default function OperationalOverviewPage() {
             </svg>
             Overview
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('orders')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'orders' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M2 3.5h10M2 7h10M2 10.5h6" stroke="currentColor" strokeLinecap="round" />
             </svg>
             Orders
             <span className="ml-auto font-mono text-[10px] text-warn bg-warn-dim border border-warn/30 rounded px-1.5 py-0.5">1,842</span>
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('inventory')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'inventory' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M7 1.5l5.5 3v5L7 12.5 1.5 9.5v-5L7 1.5z" stroke="currentColor" strokeLinejoin="round" />
               <path d="M7 7v5.5M1.5 4.5L7 7l5.5-2.5" stroke="currentColor" />
@@ -508,40 +524,70 @@ export default function OperationalOverviewPage() {
             Inventory
             <span className="ml-auto font-mono text-[10px] text-warn bg-warn-dim border border-warn/30 rounded px-1.5 py-0.5">14</span>
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('fulfillment')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'fulfillment' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M1.5 11.5h11M3 11.5V7M7 11.5V3.5M11 11.5V5.5" stroke="currentColor" strokeLinecap="round" />
             </svg>
             Fulfillment
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('simulation')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'simulation' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M4 1.5h6v3l2.5 6a1.8 1.8 0 01-1.7 2.5H3.2a1.8 1.8 0 01-1.7-2.5l2.5-6v-3z" stroke="currentColor" strokeLinejoin="round" />
               <path d="M3.5 9.5h7" stroke="currentColor" />
             </svg>
             Simulation Lab
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('optimization')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'optimization' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <circle cx="7" cy="7" r="5.5" stroke="currentColor" />
               <path d="M7 4v3l2 1.5" stroke="currentColor" strokeLinecap="round" />
             </svg>
             Optimization
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('analytics')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'analytics' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M2 12V8M5.5 12V5M9 12V7M12.5 12V2.5" stroke="currentColor" strokeLinecap="round" />
             </svg>
             Analytics
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('datasources')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'datasources' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <ellipse cx="7" cy="3.2" rx="5" ry="1.9" stroke="currentColor" />
               <path d="M2 3.2v7.6c0 1 2.2 1.9 5 1.9s5-.9 5-1.9V3.2M2 7c0 1 2.2 1.9 5 1.9s5-.9 5-1.9" stroke="currentColor" />
             </svg>
             Data Sources
           </button>
-          <button className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-text-2 hover:bg-surface-2 hover:text-text-1 text-left">
+          <button
+            onClick={() => setActiveNav('settings')}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
+              activeNav === 'settings' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            }`}
+          >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <circle cx="7" cy="7" r="1.8" stroke="currentColor" />
               <path d="M7 1.5v1.6M7 10.9v1.6M1.5 7h1.6M10.9 7h1.6M3.1 3.1l1.1 1.1M9.8 9.8l1.1 1.1M10.9 3.1L9.8 4.2M4.2 9.8L3.1 10.9" stroke="currentColor" strokeLinecap="round" />
@@ -556,7 +602,7 @@ export default function OperationalOverviewPage() {
       </aside>
 
       {/* ==================== 2. MAIN GRID ==================== */}
-      <main className="grid grid-rows-[48px_92px_26px_minmax(0,1fr)_320px_26px] gap-2 p-2 px-3 min-w-0 h-[1000px]">
+      <main className="flex flex-col gap-2 p-2 px-3 min-w-0 min-h-screen overflow-y-auto">
         {/* TOP BAR */}
         <header className="flex items-center gap-3 bg-surface border border-border rounded-md px-3">
           <button className="flex items-center gap-2 py-1 px-2 border border-border rounded text-xs font-semibold hover:border-border-strong">
@@ -668,10 +714,281 @@ export default function OperationalOverviewPage() {
           </a>
         </div>
 
-        {/* CONTENT: MAP PANEL + DRAWER */}
-        <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-2 min-h-0">
-          {/* WAREHOUSE MAP PANEL */}
-          <section className="bg-surface border border-border rounded-md flex flex-col min-w-0 min-h-0 overflow-hidden">
+        {activeNav !== 'overview' ? (
+          <div className="flex-1 bg-surface border border-border rounded-md p-6 flex flex-col gap-4 overflow-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h2 className="text-base font-semibold capitalize text-text-1 flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-live" />
+                  {activeNav} Module
+                </h2>
+                <p className="text-xs text-text-3 mt-0.5">
+                  Detailed operations workspace and dedicated management view for warehouse WH-01.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveNav('overview')}
+                className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-2 hover:text-text-1 hover:border-live transition"
+              >
+                Return to Overview Map
+              </button>
+            </div>
+
+            {activeNav === 'orders' && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Total Orders (Today)</span>
+                    <div className="text-xl font-bold mono text-text-1 mt-1">1,842</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Pending Allocation</span>
+                    <div className="text-xl font-bold mono text-warn mt-1">78</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Fulfilled in Shift</span>
+                    <div className="text-xl font-bold mono text-live mt-1">1,340</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Batch-Wave Opportunities</span>
+                    <div className="text-xl font-bold mono text-ai mt-1">42 batches</div>
+                  </div>
+                </div>
+
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Live Ingestion & Order Flow</h3>
+                  <table className="w-full text-xs text-left">
+                    <thead>
+                      <tr className="border-b border-border text-text-3 text-[10px]">
+                        <th className="p-2">Order ID</th>
+                        <th className="p-2">SKU Details</th>
+                        <th className="p-2">MU Container</th>
+                        <th className="p-2">Location</th>
+                        <th className="p-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60 mono text-[11px]">
+                      <tr>
+                        <td className="p-2 text-live font-semibold">000815296</td>
+                        <td className="p-2 font-sans">Athletic Tee Slim - S (1524289001)</td>
+                        <td className="p-2 text-cyan-400">502900</td>
+                        <td className="p-2">EH14A</td>
+                        <td className="p-2 text-live font-sans">Picking (Batch 1)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 text-live font-semibold">000815297</td>
+                        <td className="p-2 font-sans">Athletic Tee Slim - M (1524289002)</td>
+                        <td className="p-2 text-cyan-400">502900</td>
+                        <td className="p-2">EH14A</td>
+                        <td className="p-2 text-live font-sans">Picking (Batch 1)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-semibold">000815298</td>
+                        <td className="p-2 font-sans">High-Rise Compression Pant - XL</td>
+                        <td className="p-2 text-cyan-400">101003</td>
+                        <td className="p-2">EH14D</td>
+                        <td className="p-2 text-warn font-sans">Forklift Lockout</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-semibold">000815299</td>
+                        <td className="p-2 font-sans">Athletic Tee Slim - L (1524289003)</td>
+                        <td className="p-2 text-cyan-400">502900</td>
+                        <td className="p-2">EH14A</td>
+                        <td className="p-2 text-text-3 font-sans">Queued</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'inventory' && (
+              <div className="flex flex-col gap-4">
+                <div className="p-3 border border-warn/35 bg-warn-dim rounded text-xs text-warn flex items-center justify-between">
+                  <span>14 SKUs below minimum replenishment threshold across manual pick zones.</span>
+                  <button className="underline text-xs">Run Replenishment Run</button>
+                </div>
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Manipulation Unit (MU) Stock Balances</h3>
+                  <table className="w-full text-xs text-left">
+                    <thead>
+                      <tr className="border-b border-border text-text-3 text-[10px]">
+                        <th className="p-2">MU ID (Box/Cage)</th>
+                        <th className="p-2">Rack Location</th>
+                        <th className="p-2">Stored SKUs</th>
+                        <th className="p-2">Total Units</th>
+                        <th className="p-2">Platform Slot</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60 mono text-[11px]">
+                      <tr>
+                        <td className="p-2 text-cyan-400 font-bold">502900</td>
+                        <td className="p-2">EH14A</td>
+                        <td className="p-2 font-sans">1524289001 (6u), 1524289002 (5u)</td>
+                        <td className="p-2 text-live">11 units</td>
+                        <td className="p-2 font-sans">Platform 1 (Manual Pull)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 text-cyan-400 font-bold">101003</td>
+                        <td className="p-2">EH14D</td>
+                        <td className="p-2 font-sans">1524289004 (6u)</td>
+                        <td className="p-2 text-live">6 units</td>
+                        <td className="p-2 font-sans">Platform 1 (Forklift)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 text-cyan-400 font-bold">202005</td>
+                        <td className="p-2">EC07A</td>
+                        <td className="p-2 font-sans">1524289001 (12u)</td>
+                        <td className="p-2 text-live">12 units</td>
+                        <td className="p-2 font-sans">Platform 2 (Manual)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'fulfillment' && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Active Pickers</span>
+                    <div className="text-xl font-bold mono text-live mt-1">8 operators</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Active Forklifts</span>
+                    <div className="text-xl font-bold mono text-text-1 mt-1">2 vehicles</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Average Pick Rate</span>
+                    <div className="text-xl font-bold mono text-text-1 mt-1">118 lines/hr</div>
+                  </div>
+                </div>
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Zone Routing & Dispatches</h3>
+                  <p className="text-xs text-text-2 leading-relaxed">
+                    Zone E is currently running discrete order dispatches for standard lines and wave release 4a for high-density items sharing manipulation units.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'simulation' && (
+              <div className="flex flex-col gap-4">
+                <div className="border border-border rounded bg-bg-1 p-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-text-1 uppercase">Run Deterministic Simulation</h3>
+                    <p className="text-xs text-text-3">Engine evaluates routing against immutable snapshot (seed 48213).</p>
+                  </div>
+                  <button
+                    onClick={handleSimulate}
+                    disabled={simBusy}
+                    className="h-8 px-4 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition disabled:opacity-50"
+                  >
+                    {simBusy ? 'Simulating…' : 'Run Full Simulation'}
+                  </button>
+                </div>
+                <div className="border border-border rounded bg-surface-2 p-3">
+                  <h4 className="text-xs font-semibold text-text-2 mb-2">Last Run Results (SIM-2041)</h4>
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="bg-bg-1 p-2 rounded">
+                      <div className="text-text-3 text-[10px]">Travel Reduction</div>
+                      <div className="text-live font-bold mono mt-0.5">-33.5%</div>
+                    </div>
+                    <div className="bg-bg-1 p-2 rounded">
+                      <div className="text-text-3 text-[10px]">Redundant MU Trips</div>
+                      <div className="text-live font-bold mono mt-0.5">0 (was 42)</div>
+                    </div>
+                    <div className="bg-bg-1 p-2 rounded">
+                      <div className="text-text-3 text-[10px]">Platform Pull-Outs</div>
+                      <div className="text-live font-bold mono mt-0.5">-44 pulls</div>
+                    </div>
+                    <div className="bg-bg-1 p-2 rounded">
+                      <div className="text-text-3 text-[10px]">Cycle Time Saved</div>
+                      <div className="text-live font-bold mono mt-0.5">75.2 min</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'optimization' && (
+              <div className="flex flex-col gap-4">
+                <div className="border border-ai/40 bg-ai-tint p-3 rounded">
+                  <h3 className="text-xs font-bold text-ai flex items-center gap-1.5 uppercase">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Batch-Wave & Replenishment Re-scheduling (Proposal 4a)
+                  </h3>
+                  <p className="text-xs text-text-2 mt-1">
+                    Consolidates multiple single-unit order requests targeting the same 6-digit MU into a single physical visit.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'analytics' && (
+              <div className="flex flex-col gap-4">
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Throughput & Cycle Time Telemetry</h3>
+                  <p className="text-xs text-text-3">Peak picking volume occurred at 11:30 with 410 orders/hour. Zone H and Zone E represent 64% of total facility travel distance.</p>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'datasources' && (
+              <div className="flex flex-col gap-4">
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Configured Upstream Systems</h3>
+                  <ul className="text-xs space-y-2">
+                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
+                      <span>WMS Connector (Manhattan Active / SAP EWM)</span>
+                      <span className="text-live text-[10px] font-semibold mono">CONNECTED · 42ms</span>
+                    </li>
+                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
+                      <span>ERP Inventory Balance Ledger</span>
+                      <span className="text-live text-[10px] font-semibold mono">SYNCED</span>
+                    </li>
+                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
+                      <span>C# High-Throughput Simulation Worker</span>
+                      <span className="text-live text-[10px] font-semibold mono">READY (NET 9)</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {activeNav === 'settings' && (
+              <div className="flex flex-col gap-4">
+                <div className="border border-border rounded bg-bg-1 p-3">
+                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Facility & Rule Parameters</h3>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-text-3 text-[10px]">Level A Ground Platform Pull Penalty</span>
+                      <div className="font-mono text-text-1">18 seconds</div>
+                    </div>
+                    <div>
+                      <span className="text-text-3 text-[10px]">Inner Box/Cage Shuffle Penalty</span>
+                      <div className="font-mono text-text-1">25 seconds</div>
+                    </div>
+                    <div>
+                      <span className="text-text-3 text-[10px]">Forklift Pallet Lockout Window</span>
+                      <div className="font-mono text-text-1">180 seconds</div>
+                    </div>
+                    <div>
+                      <span className="text-text-3 text-[10px]">Standard Piece Pick Time</span>
+                      <div className="font-mono text-text-1">6 seconds</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* CONTENT: MAP PANEL + DRAWER */}
+            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-2 h-[460px] min-h-[460px]">
+              {/* WAREHOUSE MAP PANEL */}
+              <section className="bg-surface border border-border rounded-md flex flex-col min-w-0 min-h-0 overflow-hidden">
             <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border min-h-[34px] flex-none">
               <nav className="flex items-center gap-1.5 text-[11px] text-text-3 whitespace-nowrap">
                 <span className="mono text-text-2">{CONFIG.warehouse.id}</span>
@@ -1306,6 +1623,8 @@ export default function OperationalOverviewPage() {
             </div>
           </section>
         </div>
+      </>
+    )}
 
         {/* ==================== FOOTER ==================== */}
         <footer className="flex items-center gap-4 bg-surface border border-border rounded-md px-3 text-[10px] text-text-3 overflow-hidden whitespace-nowrap">
