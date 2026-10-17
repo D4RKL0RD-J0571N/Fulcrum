@@ -34,7 +34,10 @@ import {
   resolveCurrentObservations,
   normalizeLocationKey,
   normalizeMuKey,
-  ItemExtractionLine
+  ItemExtractionLine,
+  DEMONSTRATION_SCENARIOS,
+  getScenario,
+  generateSyntheticWarehouseData
 } from '@fulcrum/domain';
 
 import {
@@ -81,6 +84,80 @@ export default function MaterialPlanningPage() {
 
   // Selected historic run viewer
   const [selectedHistoricalRun, setSelectedHistoricalRun] = useState<PlanningRun | null>(null);
+
+  // Demonstration scenario selection state
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('initial');
+
+  const activeScenario = useMemo(() => {
+    if (selectedScenarioId === 'initial' || selectedScenarioId === 'full-synthetic-batch') {
+      return null;
+    }
+    return getScenario(selectedScenarioId) || null;
+  }, [selectedScenarioId]);
+
+  const handleLoadScenario = (scenarioId: string) => {
+    setSelectedScenarioId(scenarioId);
+    setSelectedHistoricalRun(null);
+
+    if (scenarioId === 'initial') {
+      const initial = createInitialPlanningState();
+      setState(initial);
+      setCheckedTasks({});
+      setCheckedItems({});
+      return;
+    }
+
+    if (scenarioId === 'full-synthetic-batch') {
+      const synth = generateSyntheticWarehouseData({ seed: 48213, orderCount: 30, muCount: 140 });
+      const selectedOrderIds = synth.orders.slice(0, 5).map(o => o.orderId);
+      const plan = OrderMaterialPlanner.calculatePlan(
+        synth.orders,
+        selectedOrderIds,
+        synth.observations,
+        {
+          staleThresholdMinutes: staleThreshold,
+          referenceTime: synth.baseTime,
+          runId: `RUN-SYNTH-BATCH`
+        }
+      );
+      setState(prev => ({
+        ...prev,
+        orders: synth.orders,
+        observations: synth.observations,
+        selectedOrderIds,
+        currentPlan: plan,
+        history: [plan, ...prev.history.slice(0, 19)]
+      }));
+      setCheckedTasks({});
+      setCheckedItems({});
+      return;
+    }
+
+    const scenario = getScenario(scenarioId);
+    if (!scenario) return;
+
+    const plan = OrderMaterialPlanner.calculatePlan(
+      scenario.orders,
+      scenario.selectedOrderIds,
+      scenario.observations,
+      {
+        ...scenario.options,
+        staleThresholdMinutes: scenario.options?.staleThresholdMinutes ?? staleThreshold,
+        runId: `RUN-${scenario.id.toUpperCase()}`
+      }
+    );
+
+    setState(prev => ({
+      ...prev,
+      orders: scenario.orders,
+      observations: scenario.observations,
+      selectedOrderIds: scenario.selectedOrderIds,
+      currentPlan: plan,
+      history: [plan, ...prev.history.slice(0, 19)]
+    }));
+    setCheckedTasks({});
+    setCheckedItems({});
+  };
 
   // Known materials registry (extracted dynamically from orders & observations)
   const knownMaterials = useMemo(() => {
@@ -505,27 +582,97 @@ export default function MaterialPlanningPage() {
           </div>
         )}
 
-        {/* ==================== CORE DISCLAIMER BANNER ==================== */}
-        <div className="bg-bg-surface border border-border-subtle rounded-md p-3 px-4 flex items-start gap-3 text-xs leading-relaxed no-print">
-          <ShieldAlert className="h-4 w-4 text-warn flex-none mt-0.5" />
-          <div className="flex-1 text-text-secondary">
-            <span className="font-semibold text-text-primary">Offline Stock Observations: </span>
-            Quantities are externally reported snapshots from your checkout and billing screens. Stock is not guaranteed, reserved, or live-synchronized with the warehouse floor. Always verify physical availability during checkout.
+        {/* ==================== CORE DISCLAIMER & DEMO CONTROLS BANNER ==================== */}
+        <div className="bg-bg-surface border border-border-subtle rounded-md p-3 px-4 flex flex-col md:flex-row items-start md:items-center gap-3 text-xs leading-relaxed no-print">
+          <div className="flex items-start gap-2.5 flex-1">
+            <ShieldAlert className="h-4 w-4 text-warn flex-none mt-0.5" />
+            <div className="text-text-secondary">
+              <span className="font-semibold text-text-primary">Offline Stock Observations: </span>
+              Quantities are externally reported snapshots from your checkout and billing screens. Stock is not guaranteed, reserved, or live-synchronized with the warehouse floor. Always verify physical availability during checkout.
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-none pl-3 border-l border-border-subtle">
-            <span className="text-[11px] text-text-muted">Stale threshold:</span>
-            <select
-              value={staleThreshold}
-              onChange={e => setStaleThreshold(Number(e.target.value))}
-              className="bg-bg-elevated border border-border-subtle rounded px-2 py-0.5 text-xs text-text-primary outline-none"
-            >
-              <option value={30}>30 mins</option>
-              <option value={60}>60 mins (Default)</option>
-              <option value={120}>2 hours</option>
-              <option value={240}>4 hours</option>
-            </select>
+          <div className="flex items-center gap-3 flex-wrap flex-none md:pl-3 md:border-l border-border-subtle w-full md:w-auto justify-between md:justify-start">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-text-muted font-medium">Scenario:</span>
+              <select
+                value={selectedScenarioId}
+                onChange={e => handleLoadScenario(e.target.value)}
+                className="bg-bg-elevated border border-border-subtle rounded px-2 py-0.5 text-xs text-text-primary font-medium outline-none cursor-pointer hover:border-accent"
+              >
+                <option value="initial">Default Seed (3 Orders)</option>
+                <optgroup label="10 Demonstration Presets">
+                  {DEMONSTRATION_SCENARIOS.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="High-Density Batch">
+                  <option value="full-synthetic-batch">Full Retail Batch (30 Orders, 140 MUs)</option>
+                </optgroup>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-text-muted">Stale threshold:</span>
+              <select
+                value={staleThreshold}
+                onChange={e => setStaleThreshold(Number(e.target.value))}
+                className="bg-bg-elevated border border-border-subtle rounded px-2 py-0.5 text-xs text-text-primary outline-none"
+              >
+                <option value={30}>30 mins</option>
+                <option value={60}>60 mins (Default)</option>
+                <option value={120}>2 hours</option>
+                <option value={240}>4 hours</option>
+              </select>
+            </div>
           </div>
         </div>
+
+        {/* Active Scenario Info Ribbon */}
+        {activeScenario && (
+          <div className="bg-bg-elevated border border-accent/30 rounded-md p-2.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs no-print">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-accent px-2 py-0.5 rounded bg-accent/10">Preset:</span>
+              <span className="font-semibold text-text-primary">{activeScenario.name}</span>
+              <span className="text-text-secondary">— {activeScenario.description}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="px-2 py-0.2 rounded bg-bg-surface border border-border-subtle text-[11px] font-mono text-text-primary">
+                {activeScenario.orders.length} Orders
+              </span>
+              <span className="px-2 py-0.2 rounded bg-bg-surface border border-border-subtle text-[11px] font-mono text-text-primary">
+                {activeScenario.observations.length} Observations
+              </span>
+              {activeScenario.expectedCharacteristics.expectConflicts && (
+                <span className="px-2 py-0.2 rounded bg-red-500/10 text-red-600 border border-red-500/20 text-[11px] font-semibold">
+                  Location Conflict
+                </span>
+              )}
+              {activeScenario.expectedCharacteristics.expectRestricted && (
+                <span className="px-2 py-0.2 rounded bg-red-500/10 text-red-600 border border-red-500/20 text-[11px] font-semibold">
+                  Bay/Level Lockout
+                </span>
+              )}
+              {activeScenario.expectedCharacteristics.expectShortages && (
+                <span className="px-2 py-0.2 rounded bg-warn-dim text-warn border border-warn/30 text-[11px] font-semibold">
+                  Shortage
+                </span>
+              )}
+              {activeScenario.expectedCharacteristics.expectStale && (
+                <span className="px-2 py-0.2 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 text-[11px] font-semibold">
+                  Stale Warning
+                </span>
+              )}
+              <span className={`px-2 py-0.2 rounded text-[11px] font-semibold ${
+                activeScenario.expectedCharacteristics.expectExecutable
+                  ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                  : 'bg-red-500/10 text-red-600 border border-red-500/20'
+              }`}>
+                {activeScenario.expectedCharacteristics.expectExecutable ? 'Ready for Floor' : 'Requires Resolution'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* ==================== TAB 1: PLANNING & MU PICK LIST ==================== */}
         {activeTab === 'plan' && displayedPlan && (

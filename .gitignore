@@ -9,4 +9,6 @@ dist/
 bin/
 obj/
 *.user
-*.suo
+# Playwright test output
+test-results/
+playwright-report/
