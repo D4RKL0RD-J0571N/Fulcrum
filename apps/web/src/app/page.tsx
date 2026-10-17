@@ -470,7 +470,7 @@ export default function MaterialPlanningPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-app text-text-primary flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-bg-app text-text-primary flex flex-col font-sans">
       {/* ==================== TOP NAVIGATION / HEADER ==================== */}
       <header className="border-b border-border-subtle bg-bg-surface px-4 py-2.5 flex items-center justify-between sticky top-0 z-30 shadow-xs no-print">
         <div className="flex items-center gap-3">
