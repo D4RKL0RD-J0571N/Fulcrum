@@ -18,14 +18,15 @@ export interface PlanningAppState {
   staleThresholdMinutes: number;
 }
 
-const NOW = Date.now();
+// Fixed deterministic epoch for seed data to guarantee 100% server/client hydration parity
+export const SEED_REFERENCE_TIME = 1713300000000;
 const MINUTE = 60 * 1000;
 
 export const INITIAL_ORDERS: Order[] = [
   {
     orderId: '000815296',
     priority: 'HIGH',
-    createdAt: NOW - 35 * MINUTE,
+    createdAt: SEED_REFERENCE_TIME - 35 * MINUTE,
     notes: 'Urgent checkout fulfillment - Priority batch',
     lines: [
       { lineId: 'l1', materialSku: '1524289001', materialName: 'Athletic Tee Slim — Black / S', requestedQuantity: 3 },
@@ -35,7 +36,7 @@ export const INITIAL_ORDERS: Order[] = [
   {
     orderId: '000815297',
     priority: 'STANDARD',
-    createdAt: NOW - 25 * MINUTE,
+    createdAt: SEED_REFERENCE_TIME - 25 * MINUTE,
     notes: 'Standard batch dispatch',
     lines: [
       { lineId: 'l3', materialSku: '1524289002', materialName: 'Athletic Tee Slim — Black / M', requestedQuantity: 4 },
@@ -45,7 +46,7 @@ export const INITIAL_ORDERS: Order[] = [
   {
     orderId: '000815298',
     priority: 'STANDARD',
-    createdAt: NOW - 15 * MINUTE,
+    createdAt: SEED_REFERENCE_TIME - 15 * MINUTE,
     notes: 'Floor customer request',
     lines: [
       { lineId: 'l5', materialSku: '1524289004', materialName: 'Athletic Tee Slim — Black / XL', requestedQuantity: 6 }
@@ -60,7 +61,7 @@ export const INITIAL_OBSERVATIONS: StockObservation[] = [
     materialSku: '1524289001',
     observedQuantity: 6,
     location: 'EC07A',
-    observedAt: NOW - 12 * MINUTE,
+    observedAt: SEED_REFERENCE_TIME - 12 * MINUTE,
     notes: 'Ground platform box'
   },
   {
@@ -69,7 +70,7 @@ export const INITIAL_OBSERVATIONS: StockObservation[] = [
     materialSku: '1524289002',
     observedQuantity: 5,
     location: 'EC07A',
-    observedAt: NOW - 12 * MINUTE,
+    observedAt: SEED_REFERENCE_TIME - 12 * MINUTE,
     notes: 'Ground platform box'
   },
   {
@@ -78,7 +79,7 @@ export const INITIAL_OBSERVATIONS: StockObservation[] = [
     materialSku: '1524289002',
     observedQuantity: 3,
     location: 'EH14A',
-    observedAt: NOW - 22 * MINUTE,
+    observedAt: SEED_REFERENCE_TIME - 22 * MINUTE,
     notes: 'Secondary bay box'
   },
   {
@@ -87,7 +88,7 @@ export const INITIAL_OBSERVATIONS: StockObservation[] = [
     materialSku: '2841920001',
     observedQuantity: 5,
     location: 'EH14B',
-    observedAt: NOW - 40 * MINUTE,
+    observedAt: SEED_REFERENCE_TIME - 40 * MINUTE,
     notes: 'Rack B tier container'
   },
   {
@@ -96,7 +97,7 @@ export const INITIAL_OBSERVATIONS: StockObservation[] = [
     materialSku: '1524289004',
     observedQuantity: 4, // Intentionally 4 (less than 6 requested for order 000815298 to demonstrate clear shortage detection)
     location: undefined, // Demonstrates graceful handling of unlocated observation
-    observedAt: NOW - 10 * MINUTE,
+    observedAt: SEED_REFERENCE_TIME - 10 * MINUTE,
     notes: 'Visualized on order screen without container or explicit bin'
   }
 ];
@@ -107,7 +108,11 @@ export function createInitialPlanningState(): PlanningAppState {
     INITIAL_ORDERS,
     selectedOrderIds,
     INITIAL_OBSERVATIONS,
-    { staleThresholdMinutes: 60 }
+    {
+      staleThresholdMinutes: 60,
+      referenceTime: SEED_REFERENCE_TIME,
+      runId: 'RUN-5029-INIT'
+    }
   );
 
   return {

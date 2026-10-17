@@ -39,13 +39,19 @@ import {
 
 import {
   createInitialPlanningState,
-  PlanningAppState
+  PlanningAppState,
+  SEED_REFERENCE_TIME
 } from '../lib/planningStore';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 export default function MaterialPlanningPage() {
   const [state, setState] = useState<PlanningAppState>(() => createInitialPlanningState());
   const [activeTab, setActiveTab] = useState<'plan' | 'orders' | 'observations' | 'history'>('plan');
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Stale threshold setting
   const [staleThreshold, setStaleThreshold] = useState<number>(60);
@@ -101,7 +107,8 @@ export default function MaterialPlanningPage() {
 
   // Format relative minutes
   const formatAge = (timestamp: number) => {
-    const diffMins = Math.round((Date.now() - timestamp) / (60 * 1000));
+    const now = isMounted ? Date.now() : SEED_REFERENCE_TIME;
+    const diffMins = Math.max(0, Math.round((now - timestamp) / (60 * 1000)));
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     const hours = Math.floor(diffMins / 60);
@@ -487,8 +494,8 @@ export default function MaterialPlanningPage() {
               <h1 className="text-lg font-bold">FULCRUM PHYSICAL MU COLLECTION PLAN</h1>
               <span className="text-xs font-mono">Plan: {displayedPlan.runId}</span>
             </div>
-            <div className="text-xs mt-1 text-gray-800">
-              Printed: {new Date().toLocaleString()} | Scope: {displayedPlan.selectedOrderIds.length} orders | Distinct MUs: {displayedPlan.summary.totalManipulationUnitsToCollect} | Pieces: {displayedPlan.summary.totalPiecesAllocated}u
+            <div className="text-xs mt-1 text-gray-800" suppressHydrationWarning>
+              Printed: {isMounted ? new Date().toLocaleString() : 'Ready'} | Scope: {displayedPlan.selectedOrderIds.length} orders | Distinct MUs: {displayedPlan.summary.totalManipulationUnitsToCollect} | Pieces: {displayedPlan.summary.totalPiecesAllocated}u
             </div>
             {displayedPlan.summary.hasUnresolvedConflicts && (
               <div className="text-xs font-bold text-red-600 mt-1 print-conflict-warning">

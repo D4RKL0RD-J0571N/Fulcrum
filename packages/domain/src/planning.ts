@@ -38,6 +38,7 @@ export interface StockObservation {
 export interface PlanningOptions {
   staleThresholdMinutes?: number; // default: 60 mins
   referenceTime?: number; // default: Date.now()
+  runId?: string; // Optional custom/deterministic plan identifier
 }
 
 export interface AllocationLine {
@@ -772,7 +773,7 @@ export class OrderMaterialPlanner {
       o => (calculatedAt - o.observedAt) > staleThresholdMs
     ).length;
 
-    const runId = `RUN-${Math.floor(1000 + Math.random() * 9000)}-${Date.now().toString().slice(-4)}`;
+    const runId = options.runId ?? `RUN-${Math.floor(1000 + Math.random() * 9000)}-${Date.now().toString().slice(-4)}`;
 
     const summary: PlanningSummary = {
       totalOrdersSelected: selectedOrders.length,
