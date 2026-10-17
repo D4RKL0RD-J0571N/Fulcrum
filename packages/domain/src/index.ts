@@ -473,3 +473,5 @@ export class InMemoryWarehouseLayoutRepository implements WarehouseLayoutReposit
 
 export * from './connectors';
 export * from './planning';
+export * from './generator';
+export * from './scenarios';

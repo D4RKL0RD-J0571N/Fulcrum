@@ -39,6 +39,16 @@ export interface PlanningOptions {
   staleThresholdMinutes?: number; // default: 60 mins
   referenceTime?: number; // default: Date.now()
   runId?: string; // Optional custom/deterministic plan identifier
+  /**
+   * Bay codes currently locked out due to active replenishment or forklift operations (e.g. ['EH14', 'EC07']).
+   * When a bay is locked out, manual pickers cannot enter that bay until the lockout is cleared.
+   */
+  lockedOutBays?: string[];
+  /**
+   * When true, stock on Level D (forklift-only) or in locked-out bays requires forklift equipment or clearance.
+   * Accessible stock is strongly preferred. If restricted stock is used, it flags requiresIntervention.
+   */
+  restrictForkliftLocations?: boolean;
 }
 
 export interface AllocationLine {
@@ -84,6 +94,10 @@ export interface ManipulationUnitPickTask {
   observationTimestamp: number;
   fulfillingOrderIds: string[]; // Distinct order IDs supported by this unit
   items: ItemExtractionLine[]; // Items and quantities to extract
+  // Access and operational restrictions
+  accessRestriction?: 'NONE' | 'LEVEL_D_FORKLIFT' | 'BAY_LOCKED_OUT';
+  isAccessible?: boolean; // False if on Level D or in a locked-out bay
+  requiresIntervention?: boolean; // True if requires forklift equipment or lockout clearance
 }
 
 // Alias for backwards-compatibility
@@ -112,13 +126,14 @@ export interface MaterialDemandSummary {
 }
 
 export interface PlanningWarning {
-  code: 'STALE_OBSERVATION' | 'UNSPECIFIED_LOCATION' | 'PARTIAL_FULFILLMENT' | 'TOTAL_SHORTAGE' | 'CONFLICTING_MU_LOCATION';
+  code: 'STALE_OBSERVATION' | 'UNSPECIFIED_LOCATION' | 'PARTIAL_FULFILLMENT' | 'TOTAL_SHORTAGE' | 'CONFLICTING_MU_LOCATION' | 'LEVEL_D_RESTRICTED' | 'BAY_LOCKED_OUT';
   message: string;
   materialSku?: string;
   location?: string;
   muId?: string;
   orderId?: string;
   conflictingLocations?: string[];
+  bay?: string;
 }
 
 export interface PlanningSummary {
@@ -136,7 +151,9 @@ export interface PlanningSummary {
   // Operational readiness & conflict flags
   hasUnresolvedConflicts: boolean; // True if any MU in the collection plan has conflicting locations
   conflictingMuCount: number; // Number of distinct physical MUs with conflicting locations in the plan
-  isPlanExecutable: boolean; // False if unresolved location conflicts exist
+  hasRestrictedLocations?: boolean; // True if any pick task is on Level D or in a locked-out bay
+  restrictedTaskCount?: number;
+  isPlanExecutable: boolean; // False if unresolved location conflicts or access restrictions exist
   // Backward compatibility alias
   totalRequestedUnits: number;
   totalAllocatedUnits: number;
@@ -183,6 +200,30 @@ export function normalizeLocationKey(location?: string | null): string {
  */
 export function normalizeSkuKey(sku: string): string {
   return sku.trim().toUpperCase();
+}
+
+/**
+ * Extracts normalized bay and level from a location string (e.g. "EH14D" -> bay: "EH14", level: "D").
+ * Identifies Level D as forklift-only and detects bay grouping for contention lockouts.
+ */
+export function parseLocationBayAndLevel(location?: string | null): { bay: string; level: string; isLevelD: boolean } {
+  if (!location) return { bay: '', level: '', isLevelD: false };
+  const clean = location.trim().toUpperCase();
+  // Strip any separators (e.g. E-H-14-D -> bay: EH14, level: D)
+  const parts = clean.split(/[-._]/).filter(Boolean);
+  if (parts.length >= 3) {
+    const level = parts[parts.length - 1];
+    const bayParts = parts.slice(0, parts.length - 1);
+    return { bay: bayParts.join(''), level, isLevelD: level === 'D' || level === 'TOP' };
+  }
+  // Standard compact format like EH14D (Side E, Row H, Bay 14, Level D)
+  const match = clean.match(/^([A-Z0-9]+?)([A-D])$/);
+  if (match) {
+    const bay = match[1];
+    const level = match[2];
+    return { bay, level, isLevelD: level === 'D' };
+  }
+  return { bay: clean, level: '', isLevelD: false };
 }
 
 /**
@@ -260,6 +301,8 @@ export class OrderMaterialPlanner {
     const calculatedAt = options.referenceTime ?? Date.now();
     const staleThresholdMinutes = options.staleThresholdMinutes ?? 60;
     const staleThresholdMs = staleThresholdMinutes * 60 * 1000;
+    const lockedOutBaysSet = new Set((options.lockedOutBays ?? []).map(b => normalizeLocationKey(b)));
+    const restrictForklift = options.restrictForkliftLocations ?? false;
 
     // 1. Filter to selected orders only
     const selectedSet = new Set(selectedOrderIds);
@@ -349,6 +392,9 @@ export class OrderMaterialPlanner {
       isLoose: boolean;
       normalizedLoc: string;
       isStale: boolean;
+      isRestricted: boolean;
+      isLockedOut: boolean;
+      isLevelD: boolean;
     }
 
     const poolsBySku = new Map<string, StockPoolItem[]>();
@@ -363,13 +409,21 @@ export class OrderMaterialPlanner {
         ? normalizeLocationKey(obs.location)
         : (muInfo?.hasConflict ? 'CONFLICT' : (muInfo?.isUnspecified ? '' : normalizeLocationKey(muInfo?.resolvedLocation)));
 
+      const rawLocation = obs.location || muInfo?.resolvedLocation;
+      const { bay, isLevelD } = parseLocationBayAndLevel(rawLocation);
+      const isLockedOut = lockedOutBaysSet.has(normalizeLocationKey(bay));
+      const isRestricted = isLockedOut || (restrictForklift && isLevelD);
+
       const poolItem: StockPoolItem = {
         observation: { ...obs },
         remainingQuantity: Math.max(0, obs.observedQuantity),
         muKey,
         isLoose,
         normalizedLoc,
-        isStale
+        isStale,
+        isRestricted,
+        isLockedOut,
+        isLevelD
       };
 
       if (!poolsBySku.has(skuKey)) {
@@ -446,12 +500,17 @@ export class OrderMaterialPlanner {
         }
 
         // Deterministic sorting of candidate pools with explicit MU Consolidation Preference:
+        // Priority 0: Accessible stock over restricted stock (Level D or locked-out bays)
         // Tier 1: Already selected MUs (reusing an MU already pulled for another line/order)
         // Tier 2: Unselected physical MUs with known location (location A-Z, then muId A-Z)
         // Tier 3: Unselected physical MUs with unspecified location
         // Tier 4: Loose stock with known location
         // Tier 5: Loose stock with unspecified location
         candidatePools.sort((a, b) => {
+          if (a.isRestricted !== b.isRestricted) {
+            return a.isRestricted ? 1 : -1;
+          }
+
           const aTier = !a.isLoose && selectedMuKeys.has(a.muKey) ? 1
             : !a.isLoose && a.normalizedLoc.length > 0 ? 2
             : !a.isLoose ? 3
@@ -641,6 +700,38 @@ export class OrderMaterialPlanner {
       const totalPieces = items.reduce((sum, it) => sum + it.quantity, 0);
       const fulfillingOrderIds = Array.from(g.orderIdSet).sort();
 
+      const { bay, isLevelD } = parseLocationBayAndLevel(g.location);
+      const isLockedOut = lockedOutBaysSet.has(normalizeLocationKey(bay));
+      const isForklift = isLevelD;
+
+      let accessRestriction: 'NONE' | 'LEVEL_D_FORKLIFT' | 'BAY_LOCKED_OUT' = 'NONE';
+      let isAccessible = true;
+      let requiresIntervention = false;
+
+      if (isLockedOut) {
+        accessRestriction = 'BAY_LOCKED_OUT';
+        isAccessible = false;
+        requiresIntervention = true;
+        addWarningOnce({
+          code: 'BAY_LOCKED_OUT',
+          message: `Bay ${bay} is currently locked out due to active replenishment operations. Manual picker access is blocked until the lockout is cleared.`,
+          location: g.location,
+          muId: g.muId,
+          bay
+        });
+      } else if (restrictForklift && isForklift) {
+        accessRestriction = 'LEVEL_D_FORKLIFT';
+        isAccessible = false;
+        requiresIntervention = true;
+        addWarningOnce({
+          code: 'LEVEL_D_RESTRICTED',
+          message: `Stock at ${g.location} is on Level D (forklift-only) and requires forklift equipment/operator.`,
+          location: g.location,
+          muId: g.muId,
+          bay
+        });
+      }
+
       return {
         taskId: `task_${taskSeq++}`,
         muId: g.muId,
@@ -653,25 +744,31 @@ export class OrderMaterialPlanner {
         isStale: g.isStale,
         observationTimestamp: g.observationTimestamp,
         fulfillingOrderIds,
-        items
+        items,
+        accessRestriction,
+        isAccessible,
+        requiresIntervention
       };
     });
 
     // Sort pick tasks deterministically:
     // 1. Conflicting MUs requiring resolution at the top
-    // 2. Containerized MUs with known location first (location A-Z, then muId A-Z)
-    // 3. Containerized MUs with unspecified location
-    // 4. Loose stock with known location
-    // 5. Loose stock with unspecified location
+    // 2. Tasks requiring intervention (locked bay or Level D)
+    // 3. Containerized MUs with known location (location A-Z, then muId A-Z)
+    // 4. Containerized MUs with unspecified location
+    // 5. Loose stock with known location
+    // 6. Loose stock with unspecified location
     pickList.sort((a, b) => {
       const aTier = a.hasLocationConflict ? 0
-        : !a.isLoose && !a.isUnspecifiedLocation ? 1
-        : !a.isLoose ? 2
-        : !a.isUnspecifiedLocation ? 3 : 4;
+        : a.requiresIntervention ? 1
+        : !a.isLoose && !a.isUnspecifiedLocation ? 2
+        : !a.isLoose ? 3
+        : !a.isUnspecifiedLocation ? 4 : 5;
       const bTier = b.hasLocationConflict ? 0
-        : !b.isLoose && !b.isUnspecifiedLocation ? 1
-        : !b.isLoose ? 2
-        : !b.isUnspecifiedLocation ? 3 : 4;
+        : b.requiresIntervention ? 1
+        : !b.isLoose && !b.isUnspecifiedLocation ? 2
+        : !b.isLoose ? 3
+        : !b.isUnspecifiedLocation ? 4 : 5;
 
       if (aTier !== bTier) return aTier - bTier;
 
@@ -767,7 +864,9 @@ export class OrderMaterialPlanner {
 
     const hasUnresolvedConflicts = pickList.some(t => !!t.hasLocationConflict);
     const conflictingMuCount = pickList.filter(t => !!t.hasLocationConflict).length;
-    const isPlanExecutable = !hasUnresolvedConflicts;
+    const hasRestrictedLocations = pickList.some(t => !!t.requiresIntervention);
+    const restrictedTaskCount = pickList.filter(t => !!t.requiresIntervention).length;
+    const isPlanExecutable = !hasUnresolvedConflicts && !hasRestrictedLocations;
 
     const staleObservationsCount = activeObservations.filter(
       o => (calculatedAt - o.observedAt) > staleThresholdMs
@@ -788,6 +887,8 @@ export class OrderMaterialPlanner {
       staleObservationsCount,
       hasUnresolvedConflicts,
       conflictingMuCount,
+      hasRestrictedLocations,
+      restrictedTaskCount,
       isPlanExecutable,
       totalRequestedUnits: totalPiecesRequested,
       totalAllocatedUnits: totalPiecesAllocated,
