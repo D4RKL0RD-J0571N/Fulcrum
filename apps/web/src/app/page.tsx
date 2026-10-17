@@ -1,2413 +1,1528 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Boxes,
+  Package,
   Layers,
-  Activity,
-  Play,
-  RotateCcw,
-  CheckCircle2,
-  AlertTriangle,
-  Cpu,
-  TrendingDown,
-  Clock,
-  Sparkles,
-  Search,
-  Bell,
-  X,
-  Copy,
-  ChevronRight,
-  ExternalLink,
+  ClipboardList,
+  History,
   Plus,
-  Edit3,
   Trash2,
-  Settings2,
-  Sliders,
-  PackagePlus,
-  Warehouse
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  ExternalLink,
+  Copy,
+  Check,
+  Printer,
+  ChevronRight,
+  SlidersHorizontal,
+  Info,
+  ShieldAlert,
+  Boxes,
+  CheckSquare
 } from 'lucide-react';
 
-import { LayoutEngine, WarehouseLayoutConfig, LocationStructured } from '@fulcrum/domain';
-import { PureTypeScriptSimulationEngine } from '@fulcrum/sim-engine';
-import { SimulationInputSnapshot } from '@fulcrum/contracts';
 import {
-  FacilityState,
-  UserManipulationUnit,
-  UserCreatedOrder,
-  UserAllocatedItem,
-  createInitialFacilityState,
-  buildSimulationSnapshot
-} from '../lib/facilityStore';
+  Order,
+  OrderRequirementLine,
+  StockObservation,
+  PlanningRun,
+  OrderMaterialPlanner,
+  resolveCurrentObservations,
+  normalizeLocationKey,
+  normalizeMuKey,
+  ItemExtractionLine
+} from '@fulcrum/domain';
 
-/* ============================================================
-   1. WAREHOUSE CONFIG
-   ============================================================ */
-const CONFIG = {
-  warehouse: { id: "WH-01", name: "Global Fulfillment" },
-  side: { code: "E", name: "E-commerce" },
-  rows: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(r => ({
-    id: r,
-    bays: r === "H" ? 14 : r === "Q" ? 18 : r === "W" ? 16 : 20
-  })),
-  levels: [
-    { id: "A", label: "Bottom", access: "manual" as const, heightM: 0.5 },
-    { id: "B", label: "Mid", access: "manual" as const, heightM: 2.0 },
-    { id: "C", label: "Top (manual)", access: "manual" as const, heightM: 3.5 },
-    { id: "D", label: "Forklift only", access: "forklift" as const, heightM: 5.5 }
-  ],
-  aislesAfter: [10, 16],
-  voids: ["EJ08", "ER12", "EC15"],
-  bayWidthM: 1.2,
-  platformsPerLocation: 2, // 2 platforms per location/level
-  maxMusPerPlatform: 9 // up to 9 MUs per platform -> 18 MUs per rack level
-};
+import {
+  createInitialPlanningState,
+  PlanningAppState
+} from '../lib/planningStore';
+import { ThemeToggle } from '../components/ThemeToggle';
 
-const DATA = {
-  clock: "Tue 14 Oct · 13:05",
-  syncedSec: 42,
-  kpis: [
-    { id: "pending", label: "Pending orders", value: "1,842", unit: "orders", delta: "+12%", dir: "up", cls: "" },
-    { id: "risk", label: "Orders at risk", value: "78", unit: "orders", delta: "-4%", dir: "up", cls: "text-warn" },
-    { id: "short", label: "Inventory shortages", value: "14", unit: "SKUs", delta: "+2", dir: "warn", cls: "text-warn" },
-    {
-      id: "through",
-      label: "Fulfillment throughput",
-      value: "340",
-      unit: "orders/h",
-      delta: "+5%",
-      dir: "up",
-      cls: "",
-      spark: [290, 305, 298, 312, 318, 309, 325, 331, 322, 336, 340, 340],
-      sparkLabel: "last 12 h"
-    }
-  ],
-  sim: {
-    runId: "SIM-2041",
-    seed: 48213,
-    horizonH: 8,
-    completed: "Completed 2 min ago",
-    proposal: "Proposal 4a (Batch MU Wave)",
-    metrics: [
-      { name: "Picking distance", unit: "m", base: "4,120", prop: "2,740", delta: "-33.5%" },
-      { name: "Redundant MU trips", unit: "trips", base: "42", prop: "0", delta: "-42 trips" },
-      { name: "Platform draw-outs (Lvl A)", unit: "draws", base: "68", prop: "24", delta: "-44 draws" },
-      { name: "Cage shuffles", unit: "moves", base: "19", prop: "5", delta: "-14 moves" },
-      { name: "Expected completion", unit: "", base: "15:30", prop: "14:15", delta: "-75 min" },
-      { name: "Late orders", unit: "orders", base: "18", prop: "2", delta: "-16" },
-      { name: "Workload balance", unit: "index 0–1", base: "0.71", prop: "0.89", delta: "+0.18" }
-    ]
-  },
-  queue: {
-    shown: 6,
-    total: 1842,
-    rows: [
-      { prio: 1, id: "000815296", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289001 S)", mu: "502900" },
-      { prio: 1, id: "000815297", time: "22 min", state: "Picking", source: "WH-01 stock", locs: ["EC07A", "EH14D"], itemsCount: "1 line · 1 unit (1524289002 M)", mu: "502900" },
-      { prio: 2, id: "000815298", time: "23 min", state: "Waiting stock", source: "Transfer MKT-02 · ETA 14:10", locs: ["EH14D"], itemsCount: "4 lines · 6 units", mu: "101003" },
-      { prio: 2, id: "000815299", time: "31 min", state: "Picking", source: "WH-01 stock", locs: ["EH14B"], itemsCount: "1 line · 2 units (1524289003 L)", mu: "502900" },
-      { prio: 3, id: "000815300", time: "48 min", state: "Allocated", source: "Production line P2", locs: ["EK03A"], itemsCount: "12 lines · 14 units", mu: "381402" },
-      { prio: 3, id: "000815301", time: "1 h 12 min", state: "Queued", source: "WH-01 stock", locs: ["EM09B"], itemsCount: "1 line · 1 unit", mu: "382901" }
-    ]
-  },
-  ai: {
-    observation: "Redundant trip alert: Orders 000815296 and 000815297 both request single units from parent SKU 1524289 stored in MU 502900 (Bay EH14, Platform 1). Under discrete picking, the picker walks to EH14, draws Level A cage, walks to pack station, then immediately walks back to EH14 to draw the same cage for 000815297.",
-    evidence: ["EH14D", "EH14A", "502900", "000815296", "000815297", "1524289001", "1524289002", "SIM-2041"],
-    plan: "Batch-wave orders 000815296, 000815297, and 000815299 into a single MU visit at EH14 for MU 502900 (saves 2 cage draw-outs, 180m travel, 8.4 min).",
-    affectedOrders: 3
-  },
-  locations: {
-    "EH14D": {
-      status: "Congested",
-      platforms: [
-        {
-          name: "Platform 1 (Level A Ground Pull-out)",
-          maxMuCapacity: 9,
-          muCount: 9,
-          totalUnits: 98,
-          isMixed: true,
-          mu: "502900",
-          mus: [
-            {
-              mu: "502900",
-              totalUnits: 16,
-              items: [
-                { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
-                { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" },
-                { sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A92", status: "Active" }
-              ]
-            },
-            {
-              mu: "502901",
-              totalUnits: 11,
-              items: [
-                { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "A92", status: "Active" },
-                { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C04", status: "Active" }
-              ]
-            },
-            {
-              mu: "502902",
-              totalUnits: 10,
-              items: [
-                { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "A93", status: "Active" },
-                { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A93", status: "Active" }
-              ]
-            },
-            { mu: "502903", totalUnits: 12, items: [{ sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }, { sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }] },
-            { mu: "502904", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "A94", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "A94", status: "Active" }] },
-            { mu: "502905", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "A95", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "A95", status: "Active" }] },
-            { mu: "502906", totalUnits: 10, items: [{ sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C05", status: "Active" }, { sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C05", status: "Active" }] },
-            { mu: "502907", totalUnits: 10, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 5, lot: "A96", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "A96", status: "Active" }] },
-            { mu: "502908", totalUnits: 8, items: [{ sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 8, lot: "C06", status: "Active" }] }
-          ]
-        },
-        {
-          name: "Platform 2 (Inner Cage)",
-          maxMuCapacity: 9,
-          muCount: 8,
-          totalUnits: 84,
-          isMixed: true,
-          mu: "101003",
-          mus: [
-            {
-              mu: "101003",
-              totalUnits: 12,
-              items: [
-                { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 6, lot: "B17", status: "Reserved" },
-                { sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 6, lot: "C04", status: "Active" }
-              ]
-            },
-            { mu: "101004", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B18", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "B18", status: "Active" }] },
-            { mu: "101005", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "B19", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "B19", status: "Active" }] },
-            { mu: "101006", totalUnits: 10, items: [{ sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C07", status: "Active" }, { sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 5, lot: "C07", status: "Active" }] },
-            { mu: "101007", totalUnits: 10, items: [{ sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B20", status: "Active" }, { sku: "1524289002", skuName: "Athletic Tee Slim — Black / M", parentSku: "1524289", qty: 5, lot: "B20", status: "Active" }] },
-            { mu: "101008", totalUnits: 11, items: [{ sku: "1524289003", skuName: "Athletic Tee Slim — Black / L", parentSku: "1524289", qty: 6, lot: "B21", status: "Active" }, { sku: "1524289004", skuName: "Athletic Tee Slim — Black / XL", parentSku: "1524289", qty: 5, lot: "B21", status: "Active" }] },
-            { mu: "101009", totalUnits: 10, items: [{ sku: "2841920001", skuName: "Cargo Trouser Utility — Navy / 30", parentSku: "2841920", qty: 5, lot: "C08", status: "Active" }, { sku: "2841920002", skuName: "Cargo Trouser Utility — Navy / 32", parentSku: "2841920", qty: 5, lot: "C08", status: "Active" }] },
-            { mu: "101010", totalUnits: 10, items: [{ sku: "2841920003", skuName: "Cargo Trouser Utility — Navy / 34", parentSku: "2841920", qty: 5, lot: "C09", status: "Active" }, { sku: "1524289001", skuName: "Athletic Tee Slim — Black / S", parentSku: "1524289", qty: 5, lot: "B22", status: "Active" }] }
-          ]
-        }
-      ]
-    }
-  } as Record<string, any>,
-  mapStatus: {
-    hotspot: ["EC07"],
-    constrained: ["EH12", "EH13", "EH14", "EH15"],
-    blocked: ["EI04"]
-  },
-  skuPool: [
-    { sku: "1524289001", name: "Athletic Tee Slim — Black / S", parent: "1524289" },
-    { sku: "1524289002", name: "Athletic Tee Slim — Black / M", parent: "1524289" },
-    { sku: "1524289003", name: "Athletic Tee Slim — Black / L", parent: "1524289" },
-    { sku: "1524289004", name: "Athletic Tee Slim — Black / XL", parent: "1524289" },
-    { sku: "2841920001", name: "Cargo Trouser Utility — Navy / 30", parent: "2841920" }
-  ],
-  staleZone: { row: "M", text: "Zone EM — last sync 14 min ago" }
-};
+export default function MaterialPlanningPage() {
+  const [state, setState] = useState<PlanningAppState>(() => createInitialPlanningState());
+  const [activeTab, setActiveTab] = useState<'plan' | 'orders' | 'observations' | 'history'>('plan');
 
-/* Deterministic string hash in [0, 1) */
-function hash01(str: string): number {
-  let h = 2166136261;
-  for (const ch of String(str)) {
-    h ^= ch.charCodeAt(0);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 10000) / 10000;
-}
+  // Stale threshold setting
+  const [staleThreshold, setStaleThreshold] = useState<number>(60);
+  const [copySuccess, setCopySuccess] = useState<boolean>(false);
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
-function bayCode(rowId: string, bay: number) { return CONFIG.side.code + rowId + pad2(bay); }
-function locCode(rowId: string, bay: number, level: string) { return bayCode(rowId, bay) + level; }
+  // Floor checklist state: independent of planning inputs, persisted in localStorage by runId
+  const [checkedTasks, setCheckedTasks] = useState<Record<string, boolean>>({});
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
 
-function parseLoc(code: string) {
-  if (!code) return null;
-  const m = /^([A-Z])([A-Z])(\d{2})([A-D])?$/.exec(code);
-  if (!m || m[1] !== CONFIG.side.code) return null;
-  const row = CONFIG.rows.find(r => r.id === m[2]);
-  const bay = parseInt(m[3], 10);
-  if (!row || bay < 1 || bay > row.bays) return null;
-  if (m[4] && !CONFIG.levels.some(l => l.id === m[4])) return null;
-  if (!m[4] && CONFIG.voids.includes(bayCode(m[2], bay))) return null;
-  return { row: m[2], bay, level: m[4] || null };
-}
-
-function bayOf(code: string) {
-  const p = parseLoc(code);
-  return p ? bayCode(p.row, p.bay) : null;
-}
-
-/* Get all MUs stored across the levels of a rack bay */
-function getMusInBay(bc: string, facilityState?: FacilityState) {
-  const p = parseLoc(bc + 'A');
-  if (!p) return [];
-
-  // Check if we have dynamic MUs in facilityState for this bay
-  if (facilityState) {
-    const bayMus: { mu: string; level: string; skuCount: number; totalUnits: number; isMixed: boolean }[] = [];
-    facilityState.manipulationUnits.forEach(m => {
-      if (m.locationCode.startsWith(bc)) {
-        const lvl = m.locationCode.slice(bc.length) || 'A';
-        bayMus.push({
-          mu: m.muId,
-          level: lvl,
-          skuCount: m.items.length,
-          totalUnits: m.items.reduce((sum, it) => sum + it.quantityUnits, 0),
-          isMixed: m.items.length > 1
-        });
-      }
-    });
-    if (bayMus.length > 0) return bayMus;
-  }
-
-  const mus: { mu: string; level: string; skuCount: number; totalUnits: number; isMixed: boolean }[] = [];
-  CONFIG.levels.forEach(lvl => {
-    const code = locCode(p.row, p.bay, lvl.id);
-    const plats = platformsOf(code, facilityState);
-    plats.forEach((pl: any) => {
-      if (pl.mus && Array.isArray(pl.mus)) {
-        pl.mus.forEach((m: any) => {
-          mus.push({
-            mu: m.mu,
-            level: lvl.id,
-            skuCount: m.items?.length || 2,
-            totalUnits: m.totalUnits || 11,
-            isMixed: true
-          });
-        });
-      } else {
-        mus.push({
-          mu: pl.mu,
-          level: lvl.id,
-          skuCount: pl.items?.length || 1,
-          totalUnits: pl.totalUnits || pl.qty || 15,
-          isMixed: pl.isMixed ?? true
-        });
-      }
-    });
-  });
-  return mus;
-}
-
-function locFacts(code: string) {
-  const p = parseLoc(code);
-  if (!p) return { occ: 50, platforms: 2, access: 'manual' as const, levelDef: CONFIG.levels[0] };
-  const h1 = hash01(code + "/occ"), h2 = hash01(code + "/plt");
-  const levelDef = CONFIG.levels.find(l => l.id === p.level) || CONFIG.levels[0];
-  const platforms = 1 + Math.floor(h2 * CONFIG.platformsPerLocation);
-  const occ = Math.round(20 + h1 * 78);
-  return { occ, platforms, access: levelDef.access, levelDef };
-}
-
-function statusOf(code: string) {
-  const b = bayOf(code) || code;
-  if (DATA.mapStatus.blocked.includes(b)) return { key: "blocked", label: "Blocked", cls: "crit" };
-  if (DATA.mapStatus.constrained.includes(b)) return { key: "constrained", label: "Congested", cls: "warn" };
-  if (DATA.mapStatus.hotspot.includes(b)) return { key: "hotspot", label: "High activity", cls: "live" };
-  return { key: "normal", label: "Normal", cls: "live" };
-}
-
-function platformsOf(code: string, facilityState?: FacilityState) {
-  // If dynamic MUs exist in facility state for this specific location code
-  if (facilityState) {
-    const allocatedMus = facilityState.manipulationUnits.filter(m => m.locationCode === code);
-    if (allocatedMus.length > 0) {
-      const p1Mus = allocatedMus.filter(m => m.platformId === 'plat_1' || !m.platformId.includes('2'));
-      const p2Mus = allocatedMus.filter(m => m.platformId === 'plat_2' || m.platformId.includes('2'));
-
-      return [
-        {
-          name: "Platform 1 (Front Pull-out)",
-          maxMuCapacity: CONFIG.maxMusPerPlatform,
-          muCount: p1Mus.length,
-          mus: p1Mus.map(m => ({
-            mu: m.muId,
-            totalUnits: m.items.reduce((s, it) => s + it.quantityUnits, 0),
-            isMixed: m.items.length > 1,
-            items: m.items.map(it => ({
-              sku: it.sku,
-              skuName: it.skuName,
-              parentSku: it.parentSku,
-              qty: it.quantityUnits,
-              lot: it.lotNumber,
-              status: "Active"
-            }))
-          })),
-          mu: p1Mus[0]?.muId || "502900",
-          totalUnits: p1Mus.reduce((sum, m) => sum + m.items.reduce((s, it) => s + it.quantityUnits, 0), 0),
-          items: p1Mus[0]?.items || []
-        },
-        {
-          name: "Platform 2 (Rear/Inner)",
-          maxMuCapacity: CONFIG.maxMusPerPlatform,
-          muCount: p2Mus.length,
-          mus: p2Mus.map(m => ({
-            mu: m.muId,
-            totalUnits: m.items.reduce((s, it) => s + it.quantityUnits, 0),
-            isMixed: m.items.length > 1,
-            items: m.items.map(it => ({
-              sku: it.sku,
-              skuName: it.skuName,
-              parentSku: it.parentSku,
-              qty: it.quantityUnits,
-              lot: it.lotNumber,
-              status: "Active"
-            }))
-          })),
-          mu: p2Mus[0]?.muId || "101003",
-          totalUnits: p2Mus.reduce((sum, m) => sum + m.items.reduce((s, it) => s + it.quantityUnits, 0), 0),
-          items: p2Mus[0]?.items || []
-        }
-      ];
-    }
-  }
-
-  const cur = DATA.locations[code];
-  if (cur) return cur.platforms;
-  const facts = locFacts(code);
-  const out = [];
-
-  // 2 platforms per level/location
-  for (let pIdx = 0; pIdx < CONFIG.platformsPerLocation; pIdx++) {
-    const h = hash01(code + "/p" + pIdx);
-    // Up to 9 MUs per platform (e.g., 6 to 9 boxes)
-    const muCount = 6 + Math.floor(h * 4); // 6, 7, 8, or 9 MUs
-    const musOnPlatform = [];
-
-    for (let mIdx = 0; mIdx < muCount; mIdx++) {
-      const mh = hash01(code + "/p" + pIdx + "/m" + mIdx);
-      const muNum = 100000 + Math.floor(mh * 899999);
-      const skuIdx = Math.floor(mh * (DATA.skuPool.length - 1));
-      const sku1 = DATA.skuPool[skuIdx];
-      const sku2 = DATA.skuPool[skuIdx + 1];
-      const qty1 = 5 + Math.floor(mh * 2);
-      const qty2 = 5 + Math.floor((1 - mh) * 2);
-
-      musOnPlatform.push({
-        mu: String(muNum),
-        totalUnits: qty1 + qty2,
-        isMixed: true,
-        items: [
-          { sku: sku1.sku, skuName: sku1.name, parentSku: sku1.parent, qty: qty1, lot: "A92", status: "Active" },
-          { sku: sku2.sku, skuName: sku2.name, parentSku: sku2.parent, qty: qty2, lot: "A92", status: "Active" }
-        ]
-      });
-    }
-
-    out.push({
-      name: "Platform " + (pIdx + 1) + (pIdx === 0 ? " (Front Pull-out)" : " (Rear/Inner)"),
-      maxMuCapacity: CONFIG.maxMusPerPlatform,
-      muCount: musOnPlatform.length,
-      mus: musOnPlatform,
-      // For summary display:
-      mu: musOnPlatform[0]?.mu || "101003",
-      totalUnits: musOnPlatform.reduce((sum, m) => sum + m.totalUnits, 0),
-      items: musOnPlatform[0]?.items || []
-    });
-  }
-  return out;
-}
-
-const RAMPS = {
-  teal: ["#152238", "#13304A", "#0F4A54", "#0E6B62", "#2DD4BF"],
-  amber: ["#1A2233", "#2E2A16", "#4A3A12", "#8A6410", "#FBBF24"]
-};
-function rampColor(ramp: 'teal' | 'amber', v: number) {
-  return RAMPS[ramp][Math.min(4, Math.floor(v * 5))];
-}
-
-const MODES = [
-  { id: "density", label: "Inventory density" },
-  { id: "activity", label: "Picking activity" },
-  { id: "bottleneck", label: "Bottlenecks" },
-  { id: "blocked", label: "Blocked / constrained" },
-  { id: "access", label: "Access level" }
-];
-
-export default function OperationalOverviewPage() {
-  const [activeNav, setActiveNav] = useState<string>("overview");
-  const [facility, setFacility] = useState<FacilityState>(() => createInitialFacilityState());
-  const [selectedLoc, setSelectedLoc] = useState<string>("EH14D");
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
-  const [mode, setMode] = useState<string>("density");
-  const [searchVal, setSearchVal] = useState<string>("");
-  const [searchErr, setSearchErr] = useState<string | null>(null);
-  const [highlightedOrder, setHighlightedOrder] = useState<string | null>(null);
-  const [hoveredBay, setHoveredBay] = useState<string | null>(null);
-  const [simRun, setSimRun] = useState<number>(0);
-  const [simBusy, setSimBusy] = useState<boolean>(false);
-  const [simResults, setSimResults] = useState<any | null>(null);
-  const [modalOpen, setModalOpen] = useState<boolean>(false);
-  const [modalApproved, setModalApproved] = useState<boolean>(false);
-  const [reviewChecked, setReviewChecked] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
-  const [openPlatforms, setOpenPlatforms] = useState<Record<number, boolean>>({ 0: true });
-  const [feedErrorDismissed, setFeedErrorDismissed] = useState<boolean>(false);
-
-  // Dynamic builder modals
-  const [allocateModalOpen, setAllocateModalOpen] = useState<boolean>(false);
+  // New Order Form state
   const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
-  const [layoutModalOpen, setLayoutModalOpen] = useState<boolean>(false);
+  const [newOrderId, setNewOrderId] = useState<string>('');
+  const [newOrderPriority, setNewOrderPriority] = useState<'HIGH' | 'STANDARD' | 'LOW'>('STANDARD');
+  const [newOrderNotes, setNewOrderNotes] = useState<string>('');
+  const [newOrderLines, setNewOrderLines] = useState<Array<{ sku: string; name: string; qty: number }>>([
+    { sku: '', name: '', qty: 1 }
+  ]);
 
-  // New allocation form state
-  const [newMuId, setNewMuId] = useState<string>("603100");
-  const [newLocationCode, setNewLocationCode] = useState<string>("EH14A");
-  const [newPlatformSlot, setNewPlatformSlot] = useState<string>("plat_1");
-  const [newSku, setNewSku] = useState<string>("1524289001");
-  const [newSkuName, setNewSkuName] = useState<string>("Athletic Tee Slim — Black / S");
-  const [newParentSku, setNewParentSku] = useState<string>("1524289");
-  const [newQty, setNewQty] = useState<number>(6);
-  const [newLot, setNewLot] = useState<string>("L-A99");
+  // New Observation Form state
+  const [obsModalOpen, setObsModalOpen] = useState<boolean>(false);
+  const [newObsSku, setNewObsSku] = useState<string>('');
+  const [newObsMuId, setNewObsMuId] = useState<string>('');
+  const [newObsName, setNewObsName] = useState<string>('');
+  const [newObsQty, setNewObsQty] = useState<number>(1);
+  const [newObsLocation, setNewObsLocation] = useState<string>('');
+  const [newObsNotes, setNewObsNotes] = useState<string>('');
 
-  // New order form state
-  const [newOrderId, setNewOrderId] = useState<string>("000815302");
-  const [newOrderPriority, setNewOrderPriority] = useState<'HIGH' | 'STANDARD'>('HIGH');
-  const [newOrderSku, setNewOrderSku] = useState<string>("1524289001");
-  const [newOrderQty, setNewOrderQty] = useState<number>(1);
+  // Selected historic run viewer
+  const [selectedHistoricalRun, setSelectedHistoricalRun] = useState<PlanningRun | null>(null);
 
-  // Layout editor state
-  const [layoutRowCount, setLayoutRowCount] = useState<number>(facility.layout.rowCount);
-  const [layoutBaysPerRow, setLayoutBaysPerRow] = useState<number>(facility.layout.defaultBaysPerRow);
-  const [layoutBayWidth, setLayoutBayWidth] = useState<number>(facility.layout.bayWidthMeters);
-  const [layoutAisleWidth, setLayoutAisleWidth] = useState<number>(facility.layout.aisleWidthMeters);
-
-  // SVG Geometry
-  const GEOM = { labelW: 34, headH: 18, cellW: 33, cellH: 12, rowGap: 3, aisle: 14 };
-  const bayX = (bay: number) => {
-    let x = GEOM.labelW + (bay - 1) * GEOM.cellW;
-    for (const a of CONFIG.aislesAfter) if (bay > a) x += GEOM.aisle;
-    return x;
-  };
-  const maxBays = Math.max(...CONFIG.rows.map(r => r.bays));
-  const mapWidth = bayX(maxBays) + GEOM.cellW + 6;
-  const mapHeight = GEOM.headH + CONFIG.rows.length * (GEOM.cellH + GEOM.rowGap) + 4;
-
-  const selectLocation = (code: string) => {
-    const p = parseLoc(code);
-    if (!p) return;
-    if (!p.level) {
-      let best = CONFIG.levels[0].id, bestOcc = -1;
-      for (const l of CONFIG.levels) {
-        const f = locFacts(locCode(p.row, p.bay, l.id));
-        if (f.occ > bestOcc) { bestOcc = f.occ; best = l.id; }
-      }
-      p.level = best;
-    }
-    const fullCode = locCode(p.row, p.bay, p.level);
-    setSelectedLoc(fullCode);
-    setDrawerOpen(true);
-    if (typeof window !== 'undefined') {
-      window.history.replaceState(null, '', `#loc=${fullCode}`);
-    }
-  };
-
-  const bayHeat = (bc: string) => {
-    switch (mode) {
-      case "density": return { fill: rampColor("teal", hash01(bc + "/d")) };
-      case "activity": {
-        const hot = DATA.mapStatus.hotspot.includes(bc);
-        const v = hot ? 0.97 : hash01(bc + "/a") * 0.8;
-        return { fill: rampColor("teal", v), hot };
-      }
-      case "bottleneck": {
-        const c = DATA.mapStatus.constrained.includes(bc);
-        const v = c ? 0.75 + hash01(bc + "/b") * 0.25 : hash01(bc + "/b") * 0.55;
-        return { fill: rampColor("amber", v), constrained: c };
-      }
-      case "blocked": {
-        if (DATA.mapStatus.blocked.includes(bc)) return { fill: "rgba(248,113,113,.28)", blocked: true };
-        if (DATA.mapStatus.constrained.includes(bc)) return { fill: "rgba(251,191,36,.22)", constrained: true };
-        return { fill: "#141E30" };
-      }
-      case "access": {
-        const forklift = hash01(bc + "/x") > 0.45;
-        return { fill: forklift ? "#232B45" : "#10333C", forklift };
-      }
-      default: return { fill: "#141E30" };
-    }
-  };
-
-  const handleSimulate = () => {
-    if (simBusy) return;
-    setSimBusy(true);
-    setTimeout(() => {
-      try {
-        const engine = new PureTypeScriptSimulationEngine();
-        const baseSnapshot = buildSimulationSnapshot(facility, 'BASELINE', 48213);
-        const propSnapshot = buildSimulationSnapshot(facility, 'BATCH_WAVE_ROUTING', 48213);
-        const baseResult = engine.executeRun(baseSnapshot);
-        const propResult = engine.executeRun(propSnapshot);
-
-        setSimResults({
-          base: baseResult.summary_metrics,
-          prop: propResult.summary_metrics,
-          runId: `SIM-${Math.floor(2000 + Math.random() * 500)}`
-        });
-        setSimRun(1);
-      } catch (err) {
-        console.error("Simulation error:", err);
-      } finally {
-        setSimBusy(false);
-      }
-    }, 900);
-  };
-
-  const handleSaveLayout = () => {
-    try {
-      const updatedConfig: WarehouseLayoutConfig = {
-        ...facility.layout,
-        rowCount: layoutRowCount,
-        defaultBaysPerRow: layoutBaysPerRow,
-        bayWidthMeters: layoutBayWidth,
-        aisleWidthMeters: layoutAisleWidth,
-        version: facility.layout.version + 1
-      };
-      const newLocations = LayoutEngine.generateLocations(updatedConfig);
-      setFacility(prev => ({
-        ...prev,
-        layout: updatedConfig,
-        locations: newLocations
-      }));
-      setLayoutModalOpen(false);
-    } catch (err: any) {
-      alert(`Invalid layout: ${err.message}`);
-    }
-  };
-
-  const handleAllocateMaterial = () => {
-    if (!newMuId || !newLocationCode || !newSku) {
-      alert("Please enter MU ID, Location Code, and SKU.");
-      return;
-    }
-
-    const locId = `loc_${newLocationCode.replace(/[^A-Za-z0-9]/g, '_')}`;
-    const newItem: UserAllocatedItem = {
-      sku: newSku,
-      skuName: newSkuName || `Item ${newSku}`,
-      parentSku: newParentSku || newSku.slice(0, 7),
-      quantityUnits: newQty,
-      lotNumber: newLot || 'LOT-01'
-    };
-
-    setFacility(prev => {
-      const existingMuIndex = prev.manipulationUnits.findIndex(m => m.muId === newMuId);
-      let updatedMus = [...prev.manipulationUnits];
-
-      if (existingMuIndex >= 0) {
-        const existing = updatedMus[existingMuIndex];
-        const existingItemIdx = existing.items.findIndex(it => it.sku === newSku);
-        let updatedItems = [...existing.items];
-        if (existingItemIdx >= 0) {
-          updatedItems[existingItemIdx] = {
-            ...updatedItems[existingItemIdx],
-            quantityUnits: updatedItems[existingItemIdx].quantityUnits + newQty
-          };
-        } else {
-          updatedItems.push(newItem);
+  // Known materials registry (extracted dynamically from orders & observations)
+  const knownMaterials = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const o of state.orders) {
+      for (const l of o.lines) {
+        if (!map.has(l.materialSku)) {
+          map.set(l.materialSku, l.materialName || l.materialSku);
         }
-        updatedMus[existingMuIndex] = {
-          ...existing,
-          locationId: locId,
-          locationCode: newLocationCode,
-          platformId: newPlatformSlot,
-          items: updatedItems
-        };
-      } else {
-        updatedMus.push({
-          muId: newMuId,
-          locationId: locId,
-          locationCode: newLocationCode,
-          platformId: newPlatformSlot,
-          platformName: newPlatformSlot === 'plat_1' ? 'Platform 1 (Ground Manual Pull)' : 'Platform 2 (Manual)',
-          items: [newItem]
-        });
       }
+    }
+    for (const obs of state.observations) {
+      if (!map.has(obs.materialSku)) {
+        map.set(obs.materialSku, obs.materialSku);
+      }
+    }
+    return Array.from(map.entries()).map(([sku, name]) => ({ sku, name }));
+  }, [state.orders, state.observations]);
 
-      // Append ledger movement
-      prev.ledger.appendMovement({
-        movementId: `mov_${Date.now()}_${newMuId}`,
-        workspaceId: prev.layout.workspaceId,
-        idempotencyKey: `alloc_${Date.now()}`,
-        timestamp: Date.now(),
-        movementType: 'RECEIPT',
-        toLocationId: locId,
-        toMuId: newMuId,
-        sku: newSku,
-        quantityUnits: newQty,
-        lotNumber: newLot,
-        reason: 'User allocation'
-      });
+  // Deduplicated current active observations
+  const currentObservations = useMemo(() => {
+    return resolveCurrentObservations(state.observations);
+  }, [state.observations]);
 
+  // Format relative minutes
+  const formatAge = (timestamp: number) => {
+    const diffMins = Math.round((Date.now() - timestamp) / (60 * 1000));
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const hours = Math.floor(diffMins / 60);
+    return `${hours}h ${diffMins % 60}m ago`;
+  };
+
+  // Helper to recompute plan reactively
+  const recompute = (orders: Order[], selectedIds: string[], observations: StockObservation[]) => {
+    return OrderMaterialPlanner.calculatePlan(
+      orders,
+      selectedIds,
+      observations,
+      { staleThresholdMinutes: staleThreshold, referenceTime: Date.now() }
+    );
+  };
+
+  // Run explicit calculation
+  const handleCalculatePlan = () => {
+    const newPlan = recompute(state.orders, state.selectedOrderIds, state.observations);
+    setState(prev => ({
+      ...prev,
+      currentPlan: newPlan,
+      history: [newPlan, ...prev.history.slice(0, 19)]
+    }));
+  };
+
+  // Toggle order selection
+  const handleToggleOrder = (orderId: string) => {
+    setState(prev => {
+      const exists = prev.selectedOrderIds.includes(orderId);
+      const nextIds = exists
+        ? prev.selectedOrderIds.filter(id => id !== orderId)
+        : [...prev.selectedOrderIds, orderId];
+      const newPlan = recompute(prev.orders, nextIds, prev.observations);
+      return { ...prev, selectedOrderIds: nextIds, currentPlan: newPlan };
+    });
+  };
+
+  const handleSelectAllOrders = () => {
+    setState(prev => {
+      const nextIds = prev.orders.map(o => o.orderId);
+      const newPlan = recompute(prev.orders, nextIds, prev.observations);
       return {
         ...prev,
-        manipulationUnits: updatedMus
+        selectedOrderIds: nextIds,
+        currentPlan: newPlan
+      };
+    });
+  };
+
+  const handleDeselectAllOrders = () => {
+    setState(prev => {
+      const nextIds: string[] = [];
+      const newPlan = recompute(prev.orders, nextIds, prev.observations);
+      return {
+        ...prev,
+        selectedOrderIds: nextIds,
+        currentPlan: newPlan
+      };
+    });
+  };
+
+  // Add order
+  const handleCreateOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrderId.trim()) {
+      alert('Please enter an Order ID.');
+      return;
+    }
+    const validLines = newOrderLines.filter(l => l.sku.trim() && l.qty > 0);
+    if (validLines.length === 0) {
+      alert('Please add at least one material line with a valid quantity.');
+      return;
+    }
+
+    const order: Order = {
+      orderId: newOrderId.trim(),
+      priority: newOrderPriority,
+      createdAt: Date.now(),
+      notes: newOrderNotes.trim() || undefined,
+      lines: validLines.map((l, idx) => ({
+        lineId: `line_${Date.now()}_${idx}`,
+        materialSku: l.sku.trim(),
+        materialName: l.name.trim() || undefined,
+        requestedQuantity: l.qty
+      }))
+    };
+
+    setState(prev => {
+      const nextOrders = [order, ...prev.orders];
+      const nextSelected = [...prev.selectedOrderIds, order.orderId];
+      const newPlan = recompute(nextOrders, nextSelected, prev.observations);
+      return {
+        ...prev,
+        orders: nextOrders,
+        selectedOrderIds: nextSelected,
+        currentPlan: newPlan
       };
     });
 
-    setAllocateModalOpen(false);
+    setNewOrderId('');
+    setNewOrderNotes('');
+    setNewOrderLines([{ sku: '', name: '', qty: 1 }]);
+    setOrderModalOpen(false);
   };
 
-  const handleCreateOrder = () => {
-    if (!newOrderId || !newOrderSku) {
-      alert("Please enter Order ID and SKU.");
+  // Add/Refresh Observation
+  const handleSaveObservation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newObsSku.trim()) {
+      alert('Please enter a Material SKU.');
       return;
     }
 
-    const order: UserCreatedOrder = {
-      orderId: newOrderId,
-      arrivalTimeSeconds: facility.orders.length * 60,
-      deadlineSeconds: 3600,
-      priority: newOrderPriority,
-      items: [
-        {
-          lineId: `line_${Date.now()}`,
-          sku: newOrderSku,
-          quantityUnits: newOrderQty,
-          skuName: `Product ${newOrderSku}`
-        }
-      ]
+    const obs: StockObservation = {
+      observationId: `obs_${Date.now()}`,
+      muId: newObsMuId.trim() || undefined,
+      materialSku: newObsSku.trim(),
+      observedQuantity: Math.max(0, newObsQty),
+      location: newObsLocation.trim() || undefined,
+      observedAt: Date.now(),
+      notes: newObsNotes.trim() || undefined
     };
 
-    setFacility(prev => ({
-      ...prev,
-      orders: [order, ...prev.orders]
-    }));
+    setState(prev => {
+      const nextObs = [obs, ...prev.observations];
+      const newPlan = recompute(prev.orders, prev.selectedOrderIds, nextObs);
+      return {
+        ...prev,
+        observations: nextObs,
+        currentPlan: newPlan
+      };
+    });
 
-    setOrderModalOpen(false);
-    // Increment order id for next entry
-    const nextNum = (parseInt(newOrderId, 10) + 1).toString().padStart(9, '0');
-    setNewOrderId(nextNum);
+    setNewObsSku('');
+    setNewObsMuId('');
+    setNewObsName('');
+    setNewObsQty(1);
+    setNewObsLocation('');
+    setNewObsNotes('');
+    setObsModalOpen(false);
   };
 
-  const handleCopy = () => {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(selectedLoc);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+  // Delete Order
+  const handleDeleteOrder = (orderId: string) => {
+    setState(prev => {
+      const nextOrders = prev.orders.filter(o => o.orderId !== orderId);
+      const nextSelected = prev.selectedOrderIds.filter(id => id !== orderId);
+      const newPlan = recompute(nextOrders, nextSelected, prev.observations);
+      return {
+        ...prev,
+        orders: nextOrders,
+        selectedOrderIds: nextSelected,
+        currentPlan: newPlan
+      };
+    });
+  };
+
+  // Delete Observation
+  const handleDeleteObservation = (obsId: string) => {
+    setState(prev => {
+      const nextObs = prev.observations.filter(o => o.observationId !== obsId);
+      const newPlan = recompute(prev.orders, prev.selectedOrderIds, nextObs);
+      return {
+        ...prev,
+        observations: nextObs,
+        currentPlan: newPlan
+      };
+    });
+  };
+
+  const displayedPlan = selectedHistoricalRun || state.currentPlan;
+
+  // Load and persist floor checklist progress by runId
+  useEffect(() => {
+    if (typeof window === 'undefined' || !displayedPlan?.runId) return;
+    try {
+      const saved = localStorage.getItem(`fulcrum_checklist_${displayedPlan.runId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setCheckedTasks(parsed.tasks || {});
+        setCheckedItems(parsed.items || {});
+      } else {
+        setCheckedTasks({});
+        setCheckedItems({});
+      }
+    } catch {
+      // Ignore storage errors in restricted contexts
+    }
+  }, [displayedPlan?.runId]);
+
+  const persistChecklist = (newTasks: Record<string, boolean>, newItems: Record<string, boolean>) => {
+    if (typeof window === 'undefined' || !displayedPlan?.runId) return;
+    try {
+      localStorage.setItem(
+        `fulcrum_checklist_${displayedPlan.runId}`,
+        JSON.stringify({ tasks: newTasks, items: newItems })
+      );
+    } catch {
+      // Ignore storage errors
     }
   };
 
-  const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return;
-    const q = searchVal.trim().toUpperCase();
+  const handleToggleTaskCheck = (taskId: string, items: ItemExtractionLine[]) => {
+    const nextVal = !checkedTasks[taskId];
+    const nextTasks = { ...checkedTasks, [taskId]: nextVal };
+    const nextItems = { ...checkedItems };
+    for (const it of items) {
+      nextItems[`${taskId}::${it.materialSku}`] = nextVal;
+    }
+    setCheckedTasks(nextTasks);
+    setCheckedItems(nextItems);
+    persistChecklist(nextTasks, nextItems);
+  };
 
-    // Check if query is a 6-digit MU number (e.g. 502900, 101003)
-    if (/^\d{6}$/.test(q) || q.startsWith('MU-') || q.startsWith('MU')) {
-      const muTarget = /^\d{6}$/.test(q) ? q : q.replace(/^MU-?/, '');
-      // Search curated first
-      if (muTarget === '502900' || muTarget === '101003') {
-        setSearchErr(null);
-        selectLocation('EH14D');
-        (e.target as HTMLInputElement).blur();
-        return;
-      }
-      // Scan facility MUs first
-      const foundFacilityMu = facility.manipulationUnits.find(m => m.muId === muTarget);
-      if (foundFacilityMu) {
-        setSearchErr(null);
-        selectLocation(foundFacilityMu.locationCode);
-        (e.target as HTMLInputElement).blur();
-        return;
-      }
-      // Scan bays for matching generated MU
-      for (const r of CONFIG.rows) {
-        for (let b = 1; b <= r.bays; b++) {
-          const bc = bayCode(r.id, b);
-          const mus = getMusInBay(bc, facility);
-          if (mus.some(m => m.mu === muTarget)) {
-            setSearchErr(null);
-            selectLocation(`${bc}A`);
-            (e.target as HTMLInputElement).blur();
-            return;
-          }
+  const handleToggleItemCheck = (taskId: string, sku: string, allItems: ItemExtractionLine[]) => {
+    const key = `${taskId}::${sku}`;
+    const nextVal = !checkedItems[key];
+    const nextItems = { ...checkedItems, [key]: nextVal };
+
+    const allChecked = allItems.every(it => {
+      const itKey = `${taskId}::${it.materialSku}`;
+      return itKey === key ? nextVal : !!nextItems[itKey];
+    });
+
+    const nextTasks = { ...checkedTasks, [taskId]: allChecked };
+    setCheckedTasks(nextTasks);
+    setCheckedItems(nextItems);
+    persistChecklist(nextTasks, nextItems);
+  };
+
+  const handleResetChecklist = () => {
+    setCheckedTasks({});
+    setCheckedItems({});
+    persistChecklist({}, {});
+  };
+
+  // Copy pick list to clipboard
+  const handleCopyPickList = () => {
+    const planToCopy = selectedHistoricalRun || state.currentPlan;
+    if (!planToCopy) return;
+
+    const lines = [
+      `FULCRUM PHYSICAL COLLECTION PLAN — Plan ${planToCopy.runId}`,
+      `Calculated: ${new Date(planToCopy.calculatedAt).toLocaleString()}`,
+      `Physical MUs to Collect: ${planToCopy.summary.totalManipulationUnitsToCollect} (${planToCopy.summary.totalLooseStockTasks} loose tasks)`,
+      `Total Pieces to Pick: ${planToCopy.summary.totalPiecesAllocated}u`,
+      planToCopy.summary.hasUnresolvedConflicts
+        ? `*** WARNING: PLAN HAS ${planToCopy.summary.conflictingMuCount} UNRESOLVED MU LOCATION CONFLICT(S). RESOLVE BEFORE PROCEEDING TO FLOOR. ***`
+        : `Status: Plan Ready for Collection`,
+      `Note: Reported Stock Observations — Verify physical availability during checkout.`,
+      `----------------------------------------------------`,
+      ...planToCopy.pickList.map(task => {
+        let locString = task.location;
+        if (task.hasLocationConflict) {
+          locString = `⚠️ LOCATION CONFLICT: ${task.conflictingLocations?.join(' vs ')} (REQUIRES RESOLUTION)`;
+        } else if (task.isUnspecifiedLocation) {
+          locString = `Location unspecified (Verify prior to collection)`;
         }
-      }
-      setSearchErr(`MU "${muTarget}" not found in facility.`);
-      setTimeout(() => setSearchErr(null), 3000);
-      return;
+        const header = task.isLoose
+          ? `[LOOSE STOCK @ ${locString}] (${task.totalPieces} pieces) — Orders: ${task.fulfillingOrderIds.join(', ')}`
+          : `[MU #${task.muId} @ ${locString}] (${task.totalPieces} pieces) — Orders: ${task.fulfillingOrderIds.join(', ')}`;
+        const items = task.items.map(it =>
+          `  • ${it.materialSku} (${it.materialName || 'Item'}) x ${it.quantity}u -> ${it.allocations.map(a => `${a.orderId} (${a.quantity}u)`).join(', ')}`
+        );
+        return [header, ...items].join('\n');
+      })
+    ];
+
+    if (planToCopy.shortages.length > 0) {
+      lines.push(`----------------------------------------------------`);
+      lines.push(`SHORTAGES / UNCOVERED DEMAND:`);
+      planToCopy.shortages.forEach(s => {
+        lines.push(`Order ${s.orderId}: ${s.materialSku} shortage of ${s.shortageQuantity}u (${s.reason})`);
+      });
     }
 
-    if (parseLoc(q)) {
-      setSearchErr(null);
-      selectLocation(q);
-      (e.target as HTMLInputElement).blur();
-    } else {
-      setSearchErr(`No location matches "${q}" — try location codes (EH14D) or 6-digit MU IDs (502900).`);
-      setTimeout(() => setSearchErr(null), 3000);
-    }
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    });
   };
-
-  const parsedSelected = parseLoc(selectedLoc);
-  const currentStatus = statusOf(selectedLoc);
-  const currentFacts = locFacts(selectedLoc);
-  const selectedBayCode = bayOf(selectedLoc);
 
   return (
-    <div className="w-full min-h-screen bg-bg-0 text-text-1 grid grid-cols-[200px_minmax(0,1fr)] select-none">
-      {/* ==================== 1. SIDEBAR ==================== */}
-      <aside className="bg-surface border-r border-border flex flex-col p-3 pt-2">
-        <div className="flex items-center gap-2 p-2 pb-4 text-[13px] font-semibold tracking-wide">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <path d="M3 15V3h2.4v9.6H15V15H3z" fill="#2DD4BF" />
-            <path d="M9 3h6v2.4H9z" fill="#2DD4BF" opacity=".55" />
-          </svg>
-          Fulcrum
+    <div className="min-h-screen bg-bg-app text-text-primary flex flex-col font-sans select-none">
+      {/* ==================== TOP NAVIGATION / HEADER ==================== */}
+      <header className="border-b border-border-subtle bg-bg-surface px-4 py-2.5 flex items-center justify-between sticky top-0 z-30 shadow-xs no-print">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded bg-accent flex items-center justify-center text-bg-surface font-bold text-xs">
+              F
+            </div>
+            <span className="font-semibold text-sm tracking-tight text-text-primary">Fulcrum</span>
+          </div>
+
+          <span className="text-border-strong text-xs font-light">|</span>
+
+          <span className="text-xs text-text-secondary hidden sm:inline-flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-accent" />
+            MU Collection & Material Planner
+          </span>
+
+          <span className="text-[11px] px-2 py-0.5 rounded bg-bg-elevated border border-border-subtle text-text-muted font-mono hidden md:inline">
+            Offline Billing Companion
+          </span>
         </div>
 
-        <nav className="flex flex-col gap-0.5">
+        {/* Global Navigation Tabs */}
+        <nav className="flex items-center gap-1 bg-bg-elevated p-1 rounded-md border border-border-subtle text-xs">
           <button
-            onClick={() => setActiveNav('overview')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'overview' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            onClick={() => { setActiveTab('plan'); setSelectedHistoricalRun(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition ${
+              activeTab === 'plan' && !selectedHistoricalRun
+                ? 'bg-bg-surface text-text-primary shadow-xs font-semibold'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" />
-              <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" />
-              <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" stroke="currentColor" />
-              <rect x="8" y="8" width="4.5" height="4.5" rx="1" stroke="currentColor" />
-            </svg>
-            Overview
+            <Boxes className="h-3.5 w-3.5 text-accent" />
+            <span>MU Pick Plan</span>
+            {displayedPlan && (
+              <span className="text-[10px] mono px-1.5 py-0.2 rounded bg-accent-dim text-accent font-bold">
+                {displayedPlan.summary.totalManipulationUnitsToCollect} MUs
+              </span>
+            )}
           </button>
+
           <button
-            onClick={() => setActiveNav('orders')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'orders' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            onClick={() => { setActiveTab('orders'); setSelectedHistoricalRun(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition ${
+              activeTab === 'orders'
+                ? 'bg-bg-surface text-text-primary shadow-xs font-semibold'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 3.5h10M2 7h10M2 10.5h6" stroke="currentColor" strokeLinecap="round" />
-            </svg>
-            Orders
-            <span className="ml-auto font-mono text-[10px] text-warn bg-warn-dim border border-warn/30 rounded px-1.5 py-0.5">1,842</span>
+            <Package className="h-3.5 w-3.5" />
+            <span>Orders ({state.orders.length})</span>
           </button>
+
           <button
-            onClick={() => setActiveNav('inventory')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'inventory' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            onClick={() => { setActiveTab('observations'); setSelectedHistoricalRun(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition ${
+              activeTab === 'observations'
+                ? 'bg-bg-surface text-text-primary shadow-xs font-semibold'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M7 1.5l5.5 3v5L7 12.5 1.5 9.5v-5L7 1.5z" stroke="currentColor" strokeLinejoin="round" />
-              <path d="M7 7v5.5M1.5 4.5L7 7l5.5-2.5" stroke="currentColor" />
-            </svg>
-            Inventory
-            <span className="ml-auto font-mono text-[10px] text-warn bg-warn-dim border border-warn/30 rounded px-1.5 py-0.5">14</span>
+            <MapPin className="h-3.5 w-3.5" />
+            <span>Stock Observations ({currentObservations.length})</span>
           </button>
+
           <button
-            onClick={() => setActiveNav('fulfillment')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'fulfillment' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
+            onClick={() => { setActiveTab('history'); }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition ${
+              activeTab === 'history' || selectedHistoricalRun
+                ? 'bg-bg-surface text-text-primary shadow-xs font-semibold'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M1.5 11.5h11M3 11.5V7M7 11.5V3.5M11 11.5V5.5" stroke="currentColor" strokeLinecap="round" />
-            </svg>
-            Fulfillment
-          </button>
-          <button
-            onClick={() => setActiveNav('simulation')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'simulation' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-            }`}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M4 1.5h6v3l2.5 6a1.8 1.8 0 01-1.7 2.5H3.2a1.8 1.8 0 01-1.7-2.5l2.5-6v-3z" stroke="currentColor" strokeLinejoin="round" />
-              <path d="M3.5 9.5h7" stroke="currentColor" />
-            </svg>
-            Simulation Lab
-          </button>
-          <button
-            onClick={() => setActiveNav('optimization')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'optimization' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-            }`}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="7" cy="7" r="5.5" stroke="currentColor" />
-              <path d="M7 4v3l2 1.5" stroke="currentColor" strokeLinecap="round" />
-            </svg>
-            Optimization
-          </button>
-          <button
-            onClick={() => setActiveNav('analytics')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'analytics' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-            }`}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 12V8M5.5 12V5M9 12V7M12.5 12V2.5" stroke="currentColor" strokeLinecap="round" />
-            </svg>
-            Analytics
-          </button>
-          <button
-            onClick={() => setActiveNav('datasources')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'datasources' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-            }`}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <ellipse cx="7" cy="3.2" rx="5" ry="1.9" stroke="currentColor" />
-              <path d="M2 3.2v7.6c0 1 2.2 1.9 5 1.9s5-.9 5-1.9V3.2M2 7c0 1 2.2 1.9 5 1.9s5-.9 5-1.9" stroke="currentColor" />
-            </svg>
-            Data Sources
-          </button>
-          <button
-            onClick={() => setActiveNav('settings')}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium text-left transition ${
-              activeNav === 'settings' ? 'text-live bg-live-dim' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-            }`}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="7" cy="7" r="1.8" stroke="currentColor" />
-              <path d="M7 1.5v1.6M7 10.9v1.6M1.5 7h1.6M10.9 7h1.6M3.1 3.1l1.1 1.1M9.8 9.8l1.1 1.1M10.9 3.1L9.8 4.2M4.2 9.8L3.1 10.9" stroke="currentColor" strokeLinecap="round" />
-            </svg>
-            Settings
+            <History className="h-3.5 w-3.5" />
+            <span>Runs ({state.history.length})</span>
           </button>
         </nav>
 
-        <div className="mt-auto p-2 border-t border-border text-text-3 text-[10px] leading-relaxed">
-          Fulcrum OS · build 4.2.1<br />EU-Central region
-        </div>
-      </aside>
-
-      {/* ==================== 2. MAIN GRID ==================== */}
-      <main className="flex flex-col gap-2 p-2 px-3 min-w-0 min-h-screen overflow-y-auto">
-        {/* TOP BAR */}
-        <header className="flex items-center gap-3 bg-surface border border-border rounded-md px-3">
-          <button className="flex items-center gap-2 py-1 px-2 border border-border rounded text-xs font-semibold hover:border-border-strong">
-            Global Fulfillment <span className="mono font-normal text-text-2">WH-01</span>
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M2.5 4L5 6.5 7.5 4" stroke="currentColor" strokeLinecap="round" />
-            </svg>
+        {/* Right Tools: Theme & Quick Action */}
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            onClick={handleCalculatePlan}
+            className="flex items-center gap-1.5 px-3 py-1 bg-accent hover:bg-accent-hover text-white rounded text-xs font-semibold transition shadow-xs active:translate-y-0.5"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>Recalculate</span>
           </button>
+        </div>
+      </header>
 
-          <span className="flex items-center gap-1.5 text-text-2 text-[11px]">
-            <span className="w-2 h-2 rounded-full bg-live live-pulse flex-none" />
-            Synced {DATA.syncedSec} s ago
-          </span>
-
-          <span className="mono text-text-2 text-[11px]">{DATA.clock}</span>
-
-          <div className="relative ml-auto">
-            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-text-3 pointer-events-none" />
-            <input
-              type="text"
-              value={searchVal}
-              onChange={e => setSearchVal(e.target.value)}
-              onKeyDown={handleSearch}
-              spellCheck={false}
-              autoComplete="off"
-              placeholder="Search location, SKU, order, MU... e.g. EH14D"
-              className={`w-[320px] h-[30px] bg-bg-1 border rounded text-text-1 mono text-[11px] pl-8 pr-3 outline-none transition ${
-                searchErr ? 'border-crit' : 'border-border focus:border-live'
-              }`}
-            />
-            {searchErr && (
-              <div className="absolute top-[34px] left-0 right-0 bg-surface-3 border border-crit rounded p-1.5 text-[11px] text-crit z-30">
-                {searchErr}
+      {/* ==================== MAIN CONTENT CONTAINER ==================== */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-4">
+        {/* ==================== PRINT ONLY HEADER ==================== */}
+        {displayedPlan && activeTab === 'plan' && (
+          <div className="hidden print-only mb-4 border-b-2 border-black pb-2">
+            <div className="flex justify-between items-baseline">
+              <h1 className="text-lg font-bold">FULCRUM PHYSICAL MU COLLECTION PLAN</h1>
+              <span className="text-xs font-mono">Plan: {displayedPlan.runId}</span>
+            </div>
+            <div className="text-xs mt-1 text-gray-800">
+              Printed: {new Date().toLocaleString()} | Scope: {displayedPlan.selectedOrderIds.length} orders | Distinct MUs: {displayedPlan.summary.totalManipulationUnitsToCollect} | Pieces: {displayedPlan.summary.totalPiecesAllocated}u
+            </div>
+            {displayedPlan.summary.hasUnresolvedConflicts && (
+              <div className="text-xs font-bold text-red-600 mt-1 print-conflict-warning">
+                ⚠️ OPERATIONAL WARNING: {displayedPlan.summary.conflictingMuCount} MU(S) HAVE CONFLICTING LOCATIONS — RESOLVE BEFORE WAREHOUSE FLOOR COLLECTION
               </div>
             )}
           </div>
+        )}
 
-          <button className="relative flex items-center justify-center w-[30px] h-[30px] rounded text-text-2 hover:bg-surface-2 hover:text-text-1">
-            <Bell className="h-4 w-4" />
-            <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] rounded-full bg-crit text-white text-[9px] font-bold flex items-center justify-center px-0.5">
-              3
-            </span>
-          </button>
-
-          <div className="flex items-center gap-2 pl-2 border-l border-border">
-            <span className="w-[26px] h-[26px] rounded-full bg-surface-3 border border-border-strong flex items-center justify-center text-[10px] font-bold text-live">
-              L
-            </span>
-            <span className="leading-tight">
-              <span className="text-[11px] font-semibold text-text-1">Lawson</span>
-              <br />
-              <span className="text-[10px] text-text-3">Warehouse Manager</span>
-            </span>
+        {/* ==================== CORE DISCLAIMER BANNER ==================== */}
+        <div className="bg-bg-surface border border-border-subtle rounded-md p-3 px-4 flex items-start gap-3 text-xs leading-relaxed no-print">
+          <ShieldAlert className="h-4 w-4 text-warn flex-none mt-0.5" />
+          <div className="flex-1 text-text-secondary">
+            <span className="font-semibold text-text-primary">Offline Stock Observations: </span>
+            Quantities are externally reported snapshots from your checkout and billing screens. Stock is not guaranteed, reserved, or live-synchronized with the warehouse floor. Always verify physical availability during checkout.
           </div>
-        </header>
-
-        {/* KPI STRIP */}
-        <section className="grid grid-cols-5 gap-2">
-          {DATA.kpis.map(k => (
-            <div key={k.id} className={`bg-surface border border-border rounded-md px-3 py-2 flex flex-col justify-center gap-0.5 min-w-0 ${k.cls}`}>
-              <span className="text-[10px] uppercase tracking-wider text-text-3 flex items-center gap-1.5 font-medium">
-                {k.label}
-              </span>
-              <span className="text-[20px] font-semibold mono flex items-baseline gap-1.5 whitespace-nowrap">
-                {k.value}
-                <span className="text-[11px] font-normal text-text-2 font-ui">{k.unit}</span>
-              </span>
-              <span className="text-[11px] mono flex items-center gap-1.5 text-text-3">
-                <span className={k.dir === 'up' ? 'text-live' : k.dir === 'warn' ? 'text-warn' : 'text-crit'}>
-                  {k.delta}
-                </span>
-                {k.spark ? <span className="text-[10px] text-text-3">{k.sparkLabel}</span> : <span>vs. prev. period</span>}
-              </span>
-              {k.spark && (
-                <svg className="mt-0.5" width="120" height="18" viewBox="0 0 120 18">
-                  <polyline
-                    points={k.spark.map((v, i) => `${(i / (k.spark.length - 1)) * 120},${18 - 2 - ((v - 290) / 50) * 14}`).join(' ')}
-                    fill="none"
-                    stroke="#2DD4BF"
-                    strokeWidth="1.2"
-                  />
-                </svg>
-              )}
-            </div>
-          ))}
-
-          {/* SIMULATION STATUS KPI */}
-          <div className="bg-surface border border-border rounded-md px-3 py-2 flex flex-col justify-center gap-0.5 min-w-0">
-            <span className="text-[10px] uppercase tracking-wider text-text-3 font-medium">Simulation status</span>
-            <span className="text-[13px] font-semibold mono flex items-baseline gap-1.5">
-              <span>{simRun === 1 ? 'SIM-2042' : DATA.sim.runId}</span>
-              <span className="text-[11px] font-normal text-text-2 font-ui">
-                {simRun === 1 ? 'Completed just now' : DATA.sim.completed}
-              </span>
-            </span>
-            <span className="text-[10px] mono flex items-center gap-1.5 text-text-2">
-              <span className="border border-dashed border-border-strong rounded px-1 text-[10px]">Simulated</span>
-              <span>seed {simRun === 1 ? 50617 : DATA.sim.seed} · {DATA.sim.horizonH} h</span>
-            </span>
+          <div className="flex items-center gap-2 flex-none pl-3 border-l border-border-subtle">
+            <span className="text-[11px] text-text-muted">Stale threshold:</span>
+            <select
+              value={staleThreshold}
+              onChange={e => setStaleThreshold(Number(e.target.value))}
+              className="bg-bg-elevated border border-border-subtle rounded px-2 py-0.5 text-xs text-text-primary outline-none"
+            >
+              <option value={30}>30 mins</option>
+              <option value={60}>60 mins (Default)</option>
+              <option value={120}>2 hours</option>
+              <option value={240}>4 hours</option>
+            </select>
           </div>
-        </section>
-
-        {/* SLIM WARNING BANNER */}
-        <div className="flex items-center gap-2 bg-warn-dim border border-warn/35 border-l-[3px] border-l-warn rounded px-3 text-[11px] text-warn overflow-hidden whitespace-nowrap">
-          <AlertTriangle className="h-3.5 w-3.5 flex-none" />
-          <span><b>14 SKUs</b> below safety stock in zone E — replenishment review due before 14:00.</span>
-          <a href="#" onClick={e => e.preventDefault()} className="font-semibold underline underline-offset-2 ml-1 text-warn">
-            Open inventory exceptions
-          </a>
         </div>
 
-        {activeNav !== 'overview' ? (
-          <div className="flex-1 bg-surface border border-border rounded-md p-6 flex flex-col gap-4 overflow-auto">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <h2 className="text-base font-semibold capitalize text-text-1 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-live" />
-                  {activeNav} Module
-                </h2>
-                <p className="text-xs text-text-3 mt-0.5">
-                  Detailed operations workspace and dedicated management view for warehouse WH-01.
-                </p>
+        {/* ==================== TAB 1: PLANNING & MU PICK LIST ==================== */}
+        {activeTab === 'plan' && displayedPlan && (
+          <div className="flex flex-col gap-4">
+            {/* Historical Run Banner notice if viewing an older snapshot */}
+            {selectedHistoricalRun && (
+              <div className="bg-warn-dim border border-warn/40 rounded-md p-3 px-4 flex items-center justify-between text-xs text-warn no-print">
+                <div className="flex items-center gap-2 font-medium">
+                  <History className="h-4 w-4" />
+                  Viewing Historical Frozen Plan Snapshot: <span className="font-mono font-bold">{selectedHistoricalRun.runId}</span> (Calculated {new Date(selectedHistoricalRun.calculatedAt).toLocaleTimeString()})
+                </div>
+                <button
+                  onClick={() => setSelectedHistoricalRun(null)}
+                  className="px-2 py-1 rounded bg-bg-surface text-text-primary border border-border-subtle hover:bg-bg-elevated font-semibold text-xs"
+                >
+                  Return to Latest Current Plan
+                </button>
               </div>
-              <button
-                onClick={() => setActiveNav('overview')}
-                className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-2 hover:text-text-1 hover:border-live transition"
-              >
-                Return to Overview Map
-              </button>
-            </div>
+            )}
 
-            {activeNav === 'orders' && (
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div className="grid grid-cols-4 gap-3 flex-1 mr-4">
-                    <div className="bg-surface-2 p-3 rounded border border-border">
-                      <span className="text-[10px] uppercase text-text-3">Active Order Lines</span>
-                      <div className="text-xl font-bold mono text-text-1 mt-1">{facility.orders.length} orders</div>
-                    </div>
-                    <div className="bg-surface-2 p-3 rounded border border-border">
-                      <span className="text-[10px] uppercase text-text-3">High Priority</span>
-                      <div className="text-xl font-bold mono text-warn mt-1">
-                        {facility.orders.filter(o => o.priority === 'HIGH').length}
-                      </div>
-                    </div>
-                    <div className="bg-surface-2 p-3 rounded border border-border">
-                      <span className="text-[10px] uppercase text-text-3">Configured MUs</span>
-                      <div className="text-xl font-bold mono text-live mt-1">
-                        {facility.manipulationUnits.length} units
-                      </div>
-                    </div>
-                    <div className="bg-surface-2 p-3 rounded border border-border">
-                      <span className="text-[10px] uppercase text-text-3">Simulation Status</span>
-                      <div className="text-xl font-bold mono text-ai mt-1">
-                        {simRun === 1 ? 'Simulated' : 'Ready'}
-                      </div>
-                    </div>
+            {/* Unresolved Conflict Readiness Alert */}
+            {displayedPlan.summary.hasUnresolvedConflicts && (
+              <div className="bg-crit-dim border border-crit/40 rounded-md p-3.5 px-4 flex items-center justify-between gap-3 text-xs text-crit font-medium print-conflict-warning">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="h-5 w-5 flex-none" />
+                  <div>
+                    <span className="font-bold uppercase tracking-wider block">Plan Not Ready for Floor Collection</span>
+                    <span>
+                      {displayedPlan.summary.conflictingMuCount} physical MU(s) in this plan have conflicting location observations. Verify bay locations before sending workers to the floor to avoid wasted trips.
+                    </span>
                   </div>
-                  <button
-                    onClick={() => setOrderModalOpen(true)}
-                    className="flex items-center gap-1.5 h-9 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition shadow-md"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    New Customer Order
-                  </button>
+                </div>
+                <span className="px-2.5 py-1 rounded bg-crit text-white font-mono text-[11px] font-bold flex-none">
+                  Resolution Required
+                </span>
+              </div>
+            )}
+
+            {/* Top Planning Action & Scope Bar */}
+            <div className="bg-bg-surface border border-border-subtle rounded-md p-3.5 flex flex-wrap items-center justify-between gap-3 no-print">
+              <div className="flex items-center gap-3">
+                <div className="text-xs">
+                  <span className="text-text-muted">Selected Scope: </span>
+                  <span className="font-semibold text-text-primary">{state.selectedOrderIds.length} of {state.orders.length} orders</span>
+                  <span className="text-text-muted ml-2">({displayedPlan.summary.totalPiecesRequested} pieces requested)</span>
                 </div>
 
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider">Dynamic Order Queue ({facility.orders.length})</h3>
-                    <span className="text-[11px] text-text-3">Single-unit & multi-line orders targeting physical MUs</span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    onClick={handleSelectAllOrders}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border-subtle hover:bg-bg-elevated text-text-secondary"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={handleDeselectAllOrders}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border-subtle hover:bg-bg-elevated text-text-secondary"
+                  >
+                    Clear Selection
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopyPickList}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border-subtle hover:bg-bg-elevated text-text-secondary hover:text-text-primary text-xs font-medium transition"
+                >
+                  {copySuccess ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                  <span>{copySuccess ? 'Copied to Clipboard' : 'Copy Collection Plan'}</span>
+                </button>
+
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border-subtle hover:bg-bg-elevated text-text-secondary hover:text-text-primary text-xs font-medium transition"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>Print Plan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Floor Collection Checklist Progress Bar */}
+            <div className="bg-bg-surface border border-border-subtle rounded-md p-3 px-4 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckSquare className="h-4 w-4 text-accent" />
+                  <span className="font-semibold text-text-primary">Floor Collection Checklist:</span>
+                  <span className="font-mono font-bold text-accent">
+                    {displayedPlan.pickList.filter(t => !!checkedTasks[t.taskId]).length} / {displayedPlan.pickList.length} units collected
+                  </span>
+                  <span className="text-text-muted text-[11px]">
+                    ({displayedPlan.pickList.length > 0 ? Math.round((displayedPlan.pickList.filter(t => !!checkedTasks[t.taskId]).length / displayedPlan.pickList.length) * 100) : 0}%)
+                  </span>
+                </div>
+                <div className="w-24 h-2 bg-bg-muted rounded-full overflow-hidden hidden sm:block">
+                  <div
+                    className="h-full bg-accent transition-all duration-300"
+                    style={{
+                      width: `${displayedPlan.pickList.length > 0 ? Math.round((displayedPlan.pickList.filter(t => !!checkedTasks[t.taskId]).length / displayedPlan.pickList.length) * 100) : 0}%`
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {displayedPlan.pickList.filter(t => !!checkedTasks[t.taskId]).length > 0 && (
+                  <button
+                    onClick={handleResetChecklist}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border-subtle hover:bg-bg-elevated text-text-muted hover:text-text-primary transition"
+                  >
+                    Reset Checklist
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Operational Summary KPI Tiles */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-bg-surface border border-border-subtle rounded-md p-3">
+                <span className="text-[10px] uppercase font-semibold text-text-muted">Physical MUs to Collect</span>
+                <div className="text-lg font-bold mono mt-1 flex items-baseline gap-2">
+                  <span className="text-accent text-xl">{displayedPlan.summary.totalManipulationUnitsToCollect}</span>
+                  <span className="text-xs text-text-muted font-normal font-sans">
+                    {displayedPlan.summary.totalLooseStockTasks > 0
+                      ? `(+ ${displayedPlan.summary.totalLooseStockTasks} loose)`
+                      : 'boxes'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-bg-surface border border-border-subtle rounded-md p-3">
+                <span className="text-[10px] uppercase font-semibold text-text-muted">Pieces to Pick / Extract</span>
+                <div className="text-lg font-bold mono text-text-primary mt-1 flex items-baseline gap-1.5">
+                  <span>{displayedPlan.summary.totalPiecesAllocated}</span>
+                  <span className="text-xs font-normal text-text-muted font-sans">
+                    / {displayedPlan.summary.totalPiecesRequested} requested
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-bg-surface border border-border-subtle rounded-md p-3">
+                <span className="text-[10px] uppercase font-semibold text-text-muted">Shortages / Deficits</span>
+                <div className={`text-lg font-bold mono mt-1 ${
+                  displayedPlan.summary.totalPiecesShortage > 0 ? 'text-crit' : 'text-text-muted'
+                }`}>
+                  {displayedPlan.summary.totalPiecesShortage} <span className="text-xs font-normal text-text-muted font-sans">pieces</span>
+                </div>
+              </div>
+
+              <div className="bg-bg-surface border border-border-subtle rounded-md p-3">
+                <span className="text-[10px] uppercase font-semibold text-text-muted">Order Completeness</span>
+                <div className="text-lg font-bold mono mt-1 flex items-baseline gap-2">
+                  <span className={displayedPlan.summary.totalPiecesShortage > 0 ? 'text-warn' : 'text-success'}>
+                    {displayedPlan.summary.totalPiecesRequested > 0
+                      ? `${Math.round((displayedPlan.summary.totalPiecesAllocated / displayedPlan.summary.totalPiecesRequested) * 100)}%`
+                      : '0%'}
+                  </span>
+                  <span className="text-xs text-text-muted font-normal font-sans">
+                    ({displayedPlan.summary.fullyFulfilledOrders} / {displayedPlan.summary.totalOrdersSelected} full)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Warnings Alert Box if any */}
+            {displayedPlan.warnings.length > 0 && (
+              <div className="bg-bg-surface border border-warn/30 rounded-md p-3 space-y-1.5">
+                <div className="text-xs font-semibold text-warn flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Planning Assumptions & Observations Warnings ({displayedPlan.warnings.length})
+                </div>
+                <div className="space-y-1 text-xs text-text-secondary pl-5">
+                  {displayedPlan.warnings.map((w, idx) => (
+                    <div key={idx} className="list-disc">
+                      • {w.message}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ==================== 1. RECOMMENDED PHYSICAL MU COLLECTION PLAN ==================== */}
+            <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden shadow-xs">
+              <div className="p-3 px-4 border-b border-border-subtle bg-bg-elevated flex items-center justify-between">
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary flex items-center gap-1.5">
+                    <Boxes className="h-4 w-4 text-accent" />
+                    Physical Manipulation Units to Collect (Pick Sequence)
+                  </h2>
+                  <p className="text-[11px] text-text-muted mt-0.5">
+                    Identifies each physical container to pull, the orders it supports, and items to extract.
+                  </p>
+                </div>
+                <div className="text-xs mono font-semibold text-text-secondary flex items-center gap-3">
+                  <span>{displayedPlan.summary.totalManipulationUnitsToCollect} physical MUs</span>
+                  <span>{displayedPlan.summary.totalPiecesAllocated} total pieces</span>
+                </div>
+              </div>
+
+              {displayedPlan.pickList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-text-muted">
+                  No allocations generated. Either no orders are selected or no eligible stock observations match requested materials.
+                </div>
+              ) : (
+                <div className="p-3.5 space-y-3">
+                  {displayedPlan.pickList.map((task) => (
+                    <div
+                      key={task.taskId}
+                      className={`border rounded-md bg-bg-surface overflow-hidden shadow-2xs transition print-avoid-break ${
+                        task.hasLocationConflict
+                          ? 'border-crit/50'
+                          : checkedTasks[task.taskId]
+                          ? 'border-success/40'
+                          : 'border-border-subtle hover:border-border-strong'
+                      }`}
+                    >
+                      {/* Conflicting Location Warning Banner on Card */}
+                      {task.hasLocationConflict && (
+                        <div className="p-2.5 px-3.5 bg-crit-dim border-b border-crit/30 flex items-center justify-between gap-2 text-xs text-crit font-bold print-conflict-warning">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 flex-none" />
+                            <span>LOCATION CONFLICT: Reported at {task.conflictingLocations?.join(' vs ')}. Physical verification required.</span>
+                          </div>
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-crit text-white font-mono flex-none">
+                            Verify Bay
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Physical Unit Header */}
+                      <div className="p-2.5 px-3.5 bg-bg-elevated/70 border-b border-border-subtle flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none no-print pr-1">
+                            <input
+                              type="checkbox"
+                              checked={!!checkedTasks[task.taskId]}
+                              onChange={() => handleToggleTaskCheck(task.taskId, task.items)}
+                              className="h-4 w-4 rounded border-border-strong text-accent focus:ring-accent accent-accent cursor-pointer"
+                              aria-label={`Mark task ${task.muId || 'Loose'} collected`}
+                            />
+                            <span className="text-[11px] font-medium text-text-muted">
+                              {checkedTasks[task.taskId] ? 'Collected' : 'Collect'}
+                            </span>
+                          </label>
+
+                          {task.isLoose ? (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-bg-muted border border-border-subtle text-text-secondary flex items-center gap-1">
+                              <Layers className="h-3 w-3" />
+                              Loose / Uncontainerized Stock
+                            </span>
+                          ) : (
+                            <span className="mono font-bold text-xs px-2.5 py-0.5 rounded bg-accent text-white flex items-center gap-1 shadow-2xs">
+                              <Boxes className="h-3.5 w-3.5" />
+                              MU #{task.muId}
+                            </span>
+                          )}
+
+                          <span className="text-text-muted text-[11px]">at location</span>
+
+                          {task.hasLocationConflict ? (
+                            <span className="text-crit text-[11px] font-bold bg-crit-dim px-2 py-0.5 rounded border border-crit/40 print-conflict-warning">
+                              {task.location}
+                            </span>
+                          ) : task.isUnspecifiedLocation ? (
+                            <span className="text-warn text-[11px] font-medium bg-warn-dim px-2 py-0.5 rounded border border-warn/30">
+                              Location unspecified
+                            </span>
+                          ) : (
+                            <span className="mono font-semibold text-xs px-2 py-0.5 rounded bg-bg-surface border border-border-subtle text-text-primary">
+                              {task.location}
+                            </span>
+                          )}
+
+                          {task.isStale && (
+                            <span className="text-warn text-[10px] font-semibold flex items-center gap-0.5">
+                              <Clock className="h-3 w-3" /> Stale ({formatAge(task.observationTimestamp)})
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1 text-[11px] text-text-secondary">
+                            <span className="text-text-muted">Supports Orders:</span>
+                            <div className="flex flex-wrap gap-1">
+                              {task.fulfillingOrderIds.map(id => (
+                                <span
+                                  key={id}
+                                  className="mono font-bold text-[10px] px-1.5 py-0.2 rounded bg-bg-surface border border-border-subtle text-text-primary"
+                                >
+                                  {id}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <span className="mono font-bold text-accent text-xs pl-2 border-l border-border-subtle">
+                            {task.totalPieces} pieces
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Extracted Items Table */}
+                      <div className="p-2 px-3 overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead>
+                            <tr className="border-b border-border-subtle text-text-muted text-[10px] uppercase font-semibold">
+                              <th className="py-1 px-2 text-center w-8 no-print">✓</th>
+                              <th className="py-1 px-2">Material SKU</th>
+                              <th className="py-1 px-2">Item Description</th>
+                              <th className="py-1 px-2 text-right">Extract Qty</th>
+                              <th className="py-1 px-2">Order Line Allocations</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-subtle/50 text-[11px]">
+                            {task.items.map((item, iIdx) => {
+                              const isItemChecked = !!checkedItems[`${task.taskId}::${item.materialSku}`];
+                              return (
+                                <tr key={iIdx} className={`hover:bg-bg-elevated/40 transition ${isItemChecked ? 'bg-success-dim/10' : ''}`}>
+                                  <td className="py-1.5 px-2 text-center no-print">
+                                    <input
+                                      type="checkbox"
+                                      checked={isItemChecked}
+                                      onChange={() => handleToggleItemCheck(task.taskId, item.materialSku, task.items)}
+                                      className="h-3.5 w-3.5 rounded border-border-strong text-accent focus:ring-accent accent-accent cursor-pointer"
+                                      aria-label={`Mark ${item.materialSku} extracted`}
+                                    />
+                                  </td>
+                                  <td className={`py-1.5 px-2 mono font-semibold text-text-primary ${isItemChecked ? 'line-through text-text-muted' : ''}`}>
+                                    {item.materialSku}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-text-secondary">
+                                    {item.materialName || '—'}
+                                  </td>
+                                  <td className={`py-1.5 px-2 text-right mono font-bold text-accent ${isItemChecked ? 'text-success' : ''}`}>
+                                    {item.quantity}u
+                                  </td>
+                                  <td className="py-1.5 px-2 text-text-secondary">
+                                    <div className="flex flex-wrap gap-1">
+                                      {item.allocations.map((a, aIdx) => (
+                                        <span
+                                          key={aIdx}
+                                          className="mono text-[10px] px-1.5 py-0.2 rounded bg-bg-elevated border border-border-subtle text-text-primary"
+                                        >
+                                          {a.orderId} ({a.quantity}u)
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ==================== 2. SHORTAGES & UNCOVERED DEMAND ==================== */}
+            {displayedPlan.shortages.length > 0 && (
+              <div className="bg-bg-surface border border-crit/30 rounded-md overflow-hidden shadow-xs">
+                <div className="p-3 px-4 border-b border-crit/20 bg-crit-dim flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-crit font-bold text-xs uppercase tracking-wider">
+                    <AlertTriangle className="h-4 w-4" />
+                    Shortages / Uncovered Material Demand ({displayedPlan.shortages.length} lines)
                   </div>
+                  <span className="text-xs font-mono font-bold text-crit">
+                    Total Deficit: {displayedPlan.summary.totalPiecesShortage} pieces
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left">
                     <thead>
-                      <tr className="border-b border-border text-text-3 text-[10px]">
-                        <th className="p-2">Order ID (9-Digit)</th>
-                        <th className="p-2">Priority</th>
-                        <th className="p-2">SKU Details</th>
-                        <th className="p-2">Quantity</th>
-                        <th className="p-2">Target Location / MU</th>
-                        <th className="p-2">Actions</th>
+                      <tr className="border-b border-border-subtle bg-bg-subtle text-text-secondary text-[11px]">
+                        <th className="p-2.5 px-3">Order ID</th>
+                        <th className="p-2.5 px-3">Material SKU</th>
+                        <th className="p-2.5 px-3">Item Description</th>
+                        <th className="p-2.5 px-3 text-right">Requested</th>
+                        <th className="p-2.5 px-3 text-right">Fulfilled</th>
+                        <th className="p-2.5 px-3 text-right text-crit font-bold">Shortage</th>
+                        <th className="p-2.5 px-3">Reason</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/60 mono text-[11px]">
-                      {facility.orders.map(order => {
-                        const targetMu = facility.manipulationUnits.find(m =>
-                          m.items.some(it => it.sku === order.items[0]?.sku)
-                        );
-                        return (
-                          <tr key={order.orderId} className="hover:bg-surface-2/60">
-                            <td className="p-2 text-live font-semibold">{order.orderId}</td>
-                            <td className="p-2 font-sans">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                order.priority === 'HIGH' ? 'bg-warn-dim text-warn border border-warn/40' : 'bg-surface-3 text-text-2'
-                              }`}>
-                                {order.priority}
-                              </span>
-                            </td>
-                            <td className="p-2 font-sans">
-                              <span className="text-text-1 font-semibold">{order.items[0]?.sku}</span>
-                              <span className="text-text-3 ml-1.5 text-[10px]">({order.items[0]?.skuName || 'Unit Item'})</span>
-                            </td>
-                            <td className="p-2 text-text-1">{order.items[0]?.quantityUnits}u</td>
-                            <td className="p-2 font-sans">
-                              {targetMu ? (
-                                <span className="flex items-center gap-1.5">
-                                  <span className="mono font-semibold text-text-1">{targetMu.locationCode}</span>
-                                  <span className="text-cyan-400 mono">MU {targetMu.muId}</span>
-                                </span>
-                              ) : (
-                                <span className="text-warn text-[10px]">Unallocated stock</span>
-                              )}
-                            </td>
-                            <td className="p-2 font-sans">
-                              <button
-                                onClick={() => {
-                                  setFacility(prev => ({
-                                    ...prev,
-                                    orders: prev.orders.filter(o => o.orderId !== order.orderId)
-                                  }));
-                                }}
-                                className="text-crit hover:underline text-[11px]"
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                    <tbody className="divide-y divide-border-subtle font-mono text-[11px]">
+                      {displayedPlan.shortages.map((s, idx) => (
+                        <tr key={idx} className="hover:bg-bg-elevated/50">
+                          <td className="p-2.5 px-3 font-semibold text-text-primary">{s.orderId}</td>
+                          <td className="p-2.5 px-3 text-text-primary">{s.materialSku}</td>
+                          <td className="p-2.5 px-3 font-sans text-text-secondary">{s.materialName || '—'}</td>
+                          <td className="p-2.5 px-3 text-right">{s.requestedQuantity}u</td>
+                          <td className="p-2.5 px-3 text-right">{s.fulfilledQuantity}u</td>
+                          <td className="p-2.5 px-3 text-right text-crit font-bold">-{s.shortageQuantity}u</td>
+                          <td className="p-2.5 px-3 font-sans text-text-muted text-[11px]">
+                            {s.reason === 'NO_OBSERVATIONS'
+                              ? 'No observations recorded for this SKU'
+                              : 'Reported stock exhausted by prior orders'}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
 
-            {activeNav === 'inventory' && (
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-1">Facility Inventory & Manipulation Units (MUs)</h3>
-                    <p className="text-xs text-text-3 mt-0.5">
-                      Mixed storage boxes holding packs of 5-6 units per sequential size (18 boxes per rack level).
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setAllocateModalOpen(true)}
-                    className="flex items-center gap-1.5 h-9 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition shadow-md"
-                  >
-                    <PackagePlus className="h-3.5 w-3.5" />
-                    Allocate Material to MU
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {facility.manipulationUnits.map(mu => (
-                    <div key={mu.muId} className="border border-border rounded bg-surface-2 p-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between border-b border-border/80 pb-2">
-                          <span className="mono text-sm font-bold text-cyan-400">Box/MU #{mu.muId}</span>
-                          <span className="mono text-xs px-1.5 py-0.5 rounded bg-bg-1 border border-border text-text-1">
-                            {mu.locationCode}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-text-3 mt-1.5 font-medium">
-                          {mu.platformName}
-                        </div>
-                        <div className="mt-2.5 space-y-1.5">
-                          {mu.items.map(it => (
-                            <div key={it.sku} className="flex items-center justify-between text-[11px] bg-bg-1/80 p-1.5 rounded">
-                              <div className="truncate max-w-[180px]">
-                                <span className="mono font-semibold text-text-1 mr-1">{it.sku}</span>
-                                <span className="text-text-3 text-[10px]">{it.skuName}</span>
-                              </div>
-                              <span className="mono text-live font-bold">{it.quantityUnits}u</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-3 pt-2 border-t border-border flex items-center justify-between text-[10px] text-text-3">
-                        <span>Total Units: <b className="text-text-1 mono">{mu.items.reduce((s, i) => s + i.quantityUnits, 0)}u</b></span>
-                        <button
-                          onClick={() => {
-                            selectLocation(mu.locationCode);
-                            setActiveNav('overview');
-                          }}
-                          className="text-live hover:underline font-semibold"
-                        >
-                          Inspect on Map ›
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeNav === 'fulfillment' && (
-              <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Active Pickers</span>
-                    <div className="text-xl font-bold mono text-live mt-1">8 operators</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Active Forklifts</span>
-                    <div className="text-xl font-bold mono text-text-1 mt-1">2 vehicles</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Average Pick Rate</span>
-                    <div className="text-xl font-bold mono text-text-1 mt-1">118 lines/hr</div>
-                  </div>
-                </div>
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Zone Routing & Dispatches</h3>
-                  <p className="text-xs text-text-2 leading-relaxed">
-                    Zone E is currently running discrete order dispatches for standard lines and wave release 4a for high-density items sharing manipulation units.
+            {/* ==================== 3. AGGREGATED DEMAND VS OBSERVATIONS ==================== */}
+            <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden shadow-xs">
+              <div className="p-3 px-4 border-b border-border-subtle bg-bg-elevated flex items-center justify-between">
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-accent" />
+                    Consolidated Demand vs. Available Stock Observations
+                  </h2>
+                  <p className="text-[11px] text-text-muted mt-0.5">
+                    Aggregated across all {displayedPlan.summary.totalOrdersSelected} selected orders. Multiple MUs and locations contribute separately.
                   </p>
                 </div>
               </div>
-            )}
 
-            {activeNav === 'simulation' && (
-              <div className="flex flex-col gap-4">
-                <div className="border border-border rounded bg-bg-1 p-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-bold text-text-1 uppercase">Run Deterministic Simulation</h3>
-                    <p className="text-xs text-text-3">Engine evaluates routing against immutable snapshot (seed 48213).</p>
-                  </div>
-                  <button
-                    onClick={handleSimulate}
-                    disabled={simBusy}
-                    className="h-8 px-4 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition disabled:opacity-50"
-                  >
-                    {simBusy ? 'Simulating…' : 'Run Full Simulation'}
-                  </button>
-                </div>
-                <div className="border border-border rounded bg-surface-2 p-3">
-                  <h4 className="text-xs font-semibold text-text-2 mb-2">Last Run Results (SIM-2041)</h4>
-                  <div className="grid grid-cols-4 gap-2 text-xs">
-                    <div className="bg-bg-1 p-2 rounded">
-                      <div className="text-text-3 text-[10px]">Travel Reduction</div>
-                      <div className="text-live font-bold mono mt-0.5">-33.5%</div>
-                    </div>
-                    <div className="bg-bg-1 p-2 rounded">
-                      <div className="text-text-3 text-[10px]">Redundant MU Trips</div>
-                      <div className="text-live font-bold mono mt-0.5">0 (was 42)</div>
-                    </div>
-                    <div className="bg-bg-1 p-2 rounded">
-                      <div className="text-text-3 text-[10px]">Platform Pull-Outs</div>
-                      <div className="text-live font-bold mono mt-0.5">-44 pulls</div>
-                    </div>
-                    <div className="bg-bg-1 p-2 rounded">
-                      <div className="text-text-3 text-[10px]">Cycle Time Saved</div>
-                      <div className="text-live font-bold mono mt-0.5">75.2 min</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeNav === 'optimization' && (
-              <div className="flex flex-col gap-4">
-                <div className="border border-ai/40 bg-ai-tint p-3 rounded">
-                  <h3 className="text-xs font-bold text-ai flex items-center gap-1.5 uppercase">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Batch-Wave & Replenishment Re-scheduling (Proposal 4a)
-                  </h3>
-                  <p className="text-xs text-text-2 mt-1">
-                    Consolidates multiple single-unit order requests targeting the same 6-digit MU into a single physical visit.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {activeNav === 'analytics' && (
-              <div className="flex flex-col gap-4">
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Throughput & Cycle Time Telemetry</h3>
-                  <p className="text-xs text-text-3">Peak picking volume occurred at 11:30 with 410 orders/hour. Zone H and Zone E represent 64% of total facility travel distance.</p>
-                </div>
-              </div>
-            )}
-
-            {activeNav === 'datasources' && (
-              <div className="flex flex-col gap-4">
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Configured Upstream Systems</h3>
-                  <ul className="text-xs space-y-2">
-                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
-                      <span>WMS Connector (Manhattan Active / SAP EWM)</span>
-                      <span className="text-live text-[10px] font-semibold mono">CONNECTED · 42ms</span>
-                    </li>
-                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
-                      <span>ERP Inventory Balance Ledger</span>
-                      <span className="text-live text-[10px] font-semibold mono">SYNCED</span>
-                    </li>
-                    <li className="flex items-center justify-between p-2 rounded bg-surface-2">
-                      <span>C# High-Throughput Simulation Worker</span>
-                      <span className="text-live text-[10px] font-semibold mono">READY (NET 9)</span>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {activeNav === 'settings' && (
-              <div className="flex flex-col gap-4">
-                <div className="border border-border rounded bg-bg-1 p-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-1 flex items-center gap-2">
-                      <Warehouse className="h-4 w-4 text-live" />
-                      Warehouse Dimensions & Blueprint Configuration
-                    </h3>
-                    <p className="text-xs text-text-3 mt-0.5">
-                      Configure row counts, bays per row, and physical rack spacing. Regenerates {facility.locations.length} storage locations.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setLayoutModalOpen(true)}
-                    className="flex items-center gap-1.5 h-8 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
-                  >
-                    <Sliders className="h-3.5 w-3.5" />
-                    Configure Layout Blueprint
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Configured Rows</span>
-                    <div className="text-xl font-bold mono text-text-1 mt-1">{facility.layout.rowCount} rows (A–Z)</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Default Bays / Row</span>
-                    <div className="text-xl font-bold mono text-text-1 mt-1">{facility.layout.defaultBaysPerRow} bays</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Addressable Locations</span>
-                    <div className="text-xl font-bold mono text-live mt-1">{facility.locations.length} bins</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Max MU Capacity</span>
-                    <div className="text-xl font-bold mono text-cyan-400 mt-1">18 MUs / level</div>
-                  </div>
-                </div>
-
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Facility & Rule Parameters</h3>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <span className="text-text-3 text-[10px]">Level A Ground Platform Pull Penalty</span>
-                      <div className="font-mono text-text-1">18 seconds</div>
-                    </div>
-                    <div>
-                      <span className="text-text-3 text-[10px]">Inner Box/Cage Shuffle Penalty</span>
-                      <div className="font-mono text-text-1">25 seconds</div>
-                    </div>
-                    <div>
-                      <span className="text-text-3 text-[10px]">Forklift Pallet Lockout Window</span>
-                      <div className="font-mono text-text-1">180 seconds</div>
-                    </div>
-                    <div>
-                      <span className="text-text-3 text-[10px]">Standard Piece Pick Time</span>
-                      <div className="font-mono text-text-1">6 seconds</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            {/* CONTENT: MAP PANEL + DRAWER */}
-            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-2 h-[460px] min-h-[460px]">
-              {/* WAREHOUSE MAP PANEL */}
-              <section className="bg-surface border border-border rounded-md flex flex-col min-w-0 min-h-0 overflow-hidden">
-            <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border min-h-[34px] flex-none">
-              <nav className="flex items-center gap-1.5 text-[11px] text-text-3 whitespace-nowrap">
-                <span className="mono text-text-2">{CONFIG.warehouse.id}</span>
-                <span className="text-text-3">›</span>
-                {parsedSelected ? (
-                  <>
-                    <span>{CONFIG.side.name}</span>
-                    <span className="text-text-3">›</span>
-                    <span>Row {parsedSelected.row}</span>
-                    <span className="text-text-3">›</span>
-                    <b className="text-text-1 font-semibold">Bay {pad2(parsedSelected.bay)}</b>
-                  </>
-                ) : (
-                  <>
-                    <b className="text-text-1 font-semibold">{CONFIG.side.name}</b>
-                    <span className="text-text-3">›</span>
-                    <span>No bay selected</span>
-                  </>
-                )}
-              </nav>
-
-              <span className="text-[10px] text-text-3 border border-border rounded px-1 flex-none">Layout v3</span>
-
-              {/* MODE SWITCHER */}
-              <div className="flex border border-border rounded overflow-hidden ml-auto flex-none">
-                {MODES.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => setMode(m.id)}
-                    className={`px-2 py-1 text-[10px] border-r border-border last:border-r-0 transition ${
-                      mode === m.id ? 'bg-surface-3 text-live font-medium' : 'text-text-2 hover:bg-surface-2 hover:text-text-1'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* MAP BODY */}
-            <div className="flex-1 relative min-h-0 p-2 px-3 pt-1">
-              <svg id="mapSvg" viewBox={`0 0 ${mapWidth} ${mapHeight}`} className="w-full h-full block" preserveAspectRatio="xMidYMid meet">
-                <defs>
-                  <pattern id="patBlocked" width="6" height="6" patternUnits="userSpaceOnUse">
-                    <path d="M0 6L6 0" stroke="#F87171" strokeWidth="1.1" opacity=".85" />
-                  </pattern>
-                  <pattern id="patConstrained" width="6" height="6" patternUnits="userSpaceOnUse">
-                    <circle cx="3" cy="3" r="1" fill="#FBBF24" opacity=".9" />
-                  </pattern>
-                  <pattern id="patHotspot" width="6" height="6" patternUnits="userSpaceOnUse">
-                    <circle cx="3" cy="3" r="1.4" fill="none" stroke="#5EEAD4" strokeWidth=".8" opacity=".9" />
-                  </pattern>
-                </defs>
-
-                {/* Bay numbers top ruler */}
-                {Array.from({ length: maxBays }).map((_, i) => (
-                  <text
-                    key={i}
-                    x={bayX(i + 1) + GEOM.cellW / 2}
-                    y="11"
-                    textAnchor="middle"
-                    fontSize="8"
-                    fill="var(--text-3)"
-                    fontFamily="var(--font-mono)"
-                  >
-                    {pad2(i + 1)}
-                  </text>
-                ))}
-
-                {/* Racks per row */}
-                {CONFIG.rows.map((r, ri) => {
-                  const y = GEOM.headH + ri * (GEOM.cellH + GEOM.rowGap);
-                  return (
-                    <g key={r.id}>
-                      <text
-                        x={GEOM.labelW - 6}
-                        y={y + GEOM.cellH - 3}
-                        textAnchor="end"
-                        fontSize="8.5"
-                        fill="var(--text-2)"
-                        fontFamily="var(--font-mono)"
-                      >
-                        {CONFIG.side.code + r.id}
-                      </text>
-
-                      {Array.from({ length: r.bays }).map((_, bi) => {
-                        const bayNum = bi + 1;
-                        const bc = bayCode(r.id, bayNum);
-                        if (CONFIG.voids.includes(bc)) return null;
-
-                        const heat = bayHeat(bc);
-                        const isSelected = selectedBayCode === bc && drawerOpen;
-
-                        return (
-                          <g
-                            key={bc}
-                            onClick={() => selectLocation(bc)}
-                            onMouseEnter={() => setHoveredBay(bc)}
-                            onMouseLeave={() => setHoveredBay(null)}
-                            className="cursor-pointer group"
-                            role="gridcell"
-                            aria-label={`Bay ${bc}`}
-                          >
-                            <rect
-                              x={bayX(bayNum)}
-                              y={y}
-                              width={GEOM.cellW - 2}
-                              height={GEOM.cellH}
-                              rx="2"
-                              fill={heat.fill}
-                              stroke="var(--border)"
-                              strokeWidth="0.5"
-                              className="group-hover:stroke-text-2"
-                            />
-                            {heat.blocked && (
-                              <rect x={bayX(bayNum)} y={y} width={GEOM.cellW - 2} height={GEOM.cellH} rx="2" fill="url(#patBlocked)" />
-                            )}
-                            {heat.constrained && (
-                              <rect x={bayX(bayNum)} y={y} width={GEOM.cellW - 2} height={GEOM.cellH} rx="2" fill="url(#patConstrained)" />
-                            )}
-                            {heat.hot && (
-                              <rect x={bayX(bayNum)} y={y} width={GEOM.cellW - 2} height={GEOM.cellH} rx="2" fill="url(#patHotspot)" />
-                            )}
-                            {isSelected && (
-                              <rect
-                                x={bayX(bayNum) - 1}
-                                y={y - 1}
-                                width={GEOM.cellW}
-                                height={GEOM.cellH + 2}
-                                rx="3"
-                                fill="none"
-                                stroke="#FFFFFF"
-                                strokeWidth="1.6"
-                              />
-                            )}
-                          </g>
-                        );
-                      })}
-                    </g>
-                  );
-                })}
-              </svg>
-
-              {/* Hovered Bay MU Inspector Tooltip */}
-              {hoveredBay && (
-                <div className="absolute top-2 right-4 bg-surface-3/95 backdrop-blur border border-border-strong rounded p-2.5 shadow-xl text-xs z-30 max-w-[280px]">
-                  <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-border">
-                    <span className="font-semibold text-text-1">Rack Position <span className="mono text-live">{hoveredBay}</span></span>
-                    <span className="text-[10px] text-text-3 font-mono">{getMusInBay(hoveredBay).length} MUs</span>
-                  </div>
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                    {getMusInBay(hoveredBay).map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-bg-1/70 px-1.5 py-1 rounded text-[11px] font-mono">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-text-3 font-normal text-[10px]">Lvl {item.level}</span>
-                          <span className="text-cyan-300 font-semibold">{item.mu}</span>
-                        </div>
-                        <span className="text-text-2 text-[10px] truncate max-w-[110px]">
-                          {item.skuCount} SKUs · {item.totalUnits}u
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Stale Badge on Zone M */}
-              <div
-                className="absolute flex items-center gap-1.5 bg-bg-1/95 border border-warn/45 rounded px-2 py-0.5 text-[10px] text-warn pointer-events-none"
-                style={{
-                  left: `calc(${(bayX(12) / mapWidth) * 100}% + 12px)`,
-                  top: `calc(${((GEOM.headH + 12 * (GEOM.cellH + GEOM.rowGap) - 4) / mapHeight) * 100}% + 8px)`
-                }}
-              >
-                <Clock className="h-3 w-3" />
-                <span>{DATA.staleZone.text}</span>
-              </div>
-            </div>
-
-            {/* MAP LEGEND */}
-            <div className="flex items-center gap-3 px-3 py-1 border-t border-border text-[10px] text-text-3 flex-none flex-wrap">
-              {mode === 'density' && (
-                <>
-                  <span>Inventory density:</span>
-                  <span>low</span>
-                  {RAMPS.teal.map(c => (
-                    <span key={c} className="inline-block w-2.5 h-2.5 rounded-sm border border-border-strong -mb-0.5" style={{ background: c }} />
-                  ))}
-                  <span>high</span>
-                </>
-              )}
-              {mode === 'activity' && (
-                <>
-                  <span>Picks/h:</span>
-                  <span>0</span>
-                  {RAMPS.teal.map(c => (
-                    <span key={c} className="inline-block w-2.5 h-2.5 rounded-sm border border-border-strong -mb-0.5" style={{ background: c }} />
-                  ))}
-                  <span>40+</span>
-                </>
-              )}
-              {mode === 'bottleneck' && (
-                <>
-                  <span>Queue wait:</span>
-                  <span>0 min</span>
-                  {RAMPS.amber.map(c => (
-                    <span key={c} className="inline-block w-2.5 h-2.5 rounded-sm border border-border-strong -mb-0.5" style={{ background: c }} />
-                  ))}
-                  <span>15+ min</span>
-                </>
-              )}
-              {mode === 'blocked' && (
-                <>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-crit-dim border border-crit/40" /> Blocked
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-warn-dim border border-warn/40" /> Constrained
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-surface-2 border border-border" /> Clear
-                  </span>
-                </>
-              )}
-              {mode === 'access' && (
-                <>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[#10333C] border border-border" /> Manual pick (A–C)
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[#232B45] border border-border" /> Forklift-dominant (D)
-                  </span>
-                </>
-              )}
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-sm border border-border-strong" style={{ background: 'repeating-linear-gradient(45deg,transparent 0 2px,#F87171 2px 3px)' }} />
-                Blocked hatch
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-sm border border-border-strong" style={{ background: 'radial-gradient(circle at 50% 50%,#FBBF24 1.5px,transparent 1.6px)' }} />
-                Constrained dots
-              </span>
-              <span className="ml-auto mono">Bay width {CONFIG.bayWidthM.toFixed(1)} m · levels A–D · aisle 3.0 m</span>
-            </div>
-          </section>
-
-          {/* SELECTED LOCATION DRAWER */}
-          <aside className="bg-surface border border-border rounded-md flex flex-col min-h-0 overflow-hidden">
-            {drawerOpen && parsedSelected ? (
-              <div className="flex flex-col min-h-0 flex-1">
-                {/* DRAWER HEAD */}
-                <div className="p-3 border-b border-border flex-none">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[17px] font-bold mono tracking-wide text-text-1">{selectedLoc}</span>
-                    <button
-                      onClick={handleCopy}
-                      className="flex items-center gap-1 text-[10px] text-text-2 border border-border rounded px-1.5 py-0.5 hover:border-border-strong hover:text-text-1"
-                    >
-                      <Copy className="h-2.5 w-2.5" />
-                      <span>{copied ? 'Copied' : 'Copy'}</span>
-                    </button>
-                  </div>
-
-                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                    {currentStatus.key === 'normal' ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-live/35 bg-live-dim text-live">
-                        <span className="w-1.5 h-1.5 rounded-full bg-live" /> Live
-                      </span>
-                    ) : (
-                      <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border ${
-                        currentStatus.cls === 'warn' ? 'border-warn/40 bg-warn-dim text-warn' : 'border-crit/40 bg-crit-dim text-crit'
-                      }`}>
-                        {currentStatus.label}
-                      </span>
-                    )}
-
-                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-border bg-surface-2 text-text-2">
-                      Level {parsedSelected.level} — {currentFacts.levelDef.label}
-                    </span>
-                  </div>
-
-                  <nav className="flex items-center gap-1 text-[11px] text-text-3 mt-2">
-                    <span className="mono text-text-2">{CONFIG.warehouse.id}</span>
-                    <span>›</span>
-                    <span>{CONFIG.side.name}</span>
-                    <span>›</span>
-                    <span>Row {parsedSelected.row}</span>
-                    <span>›</span>
-                    <span>Bay {pad2(parsedSelected.bay)}</span>
-                    <span>›</span>
-                    <b className="text-text-1 font-semibold">Level {parsedSelected.level}</b>
-                  </nav>
-                </div>
-
-                {/* DRAWER BODY */}
-                <div className="flex-1 overflow-y-auto p-3 min-h-0 space-y-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium flex items-center justify-between">
-                      <span>Rack elevation — bay {bayCode(parsedSelected.row, parsedSelected.bay)}</span>
-                      <span className="mono text-[10px] text-cyan-400 font-normal">
-                        {getMusInBay(bayCode(parsedSelected.row, parsedSelected.bay)).length} MUs in rack
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      {[...CONFIG.levels].reverse().map(l => {
-                        const lc = locCode(parsedSelected.row, parsedSelected.bay, l.id);
-                        const f = locFacts(lc);
-                        const isCurrent = l.id === parsedSelected.level;
-
-                        return (
-                          <button
-                            key={l.id}
-                            onClick={() => selectLocation(lc)}
-                            className={`grid grid-cols-[64px_1fr_86px] items-center gap-2 p-1.5 px-2 rounded border bg-bg-1 text-left transition ${
-                              isCurrent ? 'border-live bg-live-dim' : 'border-border hover:border-border-strong'
-                            }`}
-                          >
-                            <span className="text-xs font-semibold mono flex items-center gap-1 text-text-1">
-                              {l.access === 'forklift' ? (
-                                <AlertTriangle className="h-3 w-3 text-warn" />
-                              ) : (
-                                <CheckCircle2 className="h-3 w-3 text-live" />
-                              )}
-                              {lc}
-                            </span>
-                            <span className="h-1.5 rounded-full bg-surface-3 overflow-hidden block">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-border-subtle bg-bg-subtle text-text-secondary text-[11px]">
+                      <th className="p-2.5 px-3">Material SKU</th>
+                      <th className="p-2.5 px-3">Description</th>
+                      <th className="p-2.5 px-3 text-right">Total Demand</th>
+                      <th className="p-2.5 px-3 text-right">Available Observed</th>
+                      <th className="p-2.5 px-3 text-right">Allocated</th>
+                      <th className="p-2.5 px-3 text-right">Shortage</th>
+                      <th className="p-2.5 px-3">Contributing MUs & Locations</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-subtle font-mono text-[11px]">
+                    {displayedPlan.aggregatedDemand.map((d, idx) => (
+                      <tr key={idx} className="hover:bg-bg-elevated/50">
+                        <td className="p-2.5 px-3 font-semibold text-text-primary">{d.materialSku}</td>
+                        <td className="p-2.5 px-3 font-sans text-text-secondary">{d.materialName || '—'}</td>
+                        <td className="p-2.5 px-3 text-right font-bold text-text-primary">{d.totalRequested}u</td>
+                        <td className="p-2.5 px-3 text-right text-text-secondary">{d.availableObservedQuantity}u</td>
+                        <td className="p-2.5 px-3 text-right text-accent font-bold">{d.totalAllocated}u</td>
+                        <td className={`p-2.5 px-3 text-right font-bold ${d.totalShortage > 0 ? 'text-crit' : 'text-text-muted'}`}>
+                          {d.totalShortage > 0 ? `-${d.totalShortage}u` : '0u'}
+                        </td>
+                        <td className="p-2.5 px-3 font-sans text-text-secondary">
+                          <div className="flex flex-wrap gap-1">
+                            {d.contributingMUs.map((mu, mIdx) => (
                               <span
-                                className="block h-full rounded-full"
-                                style={{ width: `${f.occ}%`, background: isCurrent ? 'var(--live)' : 'var(--text-3)' }}
-                              />
-                            </span>
-                            <span className="text-[10px] text-text-2 text-right mono">
-                              {f.occ}% · {f.platforms} plt
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Rack Position MUs Overview Card */}
-                  <div className="p-2.5 rounded border border-border bg-surface-2/60">
-                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-semibold flex items-center justify-between">
-                      <span>Boxes / MUs in this rack position</span>
-                      <span className="mono text-live text-[10px]">Bay {bayCode(parsedSelected.row, parsedSelected.bay)}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {getMusInBay(bayCode(parsedSelected.row, parsedSelected.bay)).map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-1 border border-border-strong text-[11px] mono text-text-1"
-                        >
-                          <span className="text-text-3 text-[10px]">L{item.level}:</span>
-                          <span className="text-cyan-300 font-bold">{item.mu}</span>
-                          <span className="text-text-3 text-[9px]">({item.totalUnits}u · {item.skuCount} SKUs)</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1.5 font-medium flex items-center justify-between">
-                      <span>Platforms at {selectedLoc}</span>
-                      <span className="mono text-[10px] text-text-3 font-normal">Cap: 9 MUs / platform (18 / level)</span>
-                    </div>
-
-                    <div className="space-y-2">
-                      {platformsOf(selectedLoc).map((pl: any, i: number) => {
-                        const isOpen = openPlatforms[i] ?? (i === 0);
-                        const musList = pl.mus || [{
-                          mu: pl.mu,
-                          totalUnits: pl.totalUnits || 16,
-                          items: pl.items || []
-                        }];
-
-                        return (
-                          <div key={i} className="border border-border rounded overflow-hidden bg-bg-1">
-                            <button
-                              onClick={() => setOpenPlatforms(prev => ({ ...prev, [i]: !isOpen }))}
-                              className="flex items-center gap-2 w-full p-2 text-left text-[11px] hover:bg-surface-2"
-                            >
-                              <ChevronRight className={`h-3 w-3 text-text-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                              <span className="font-semibold text-text-1">{pl.name}</span>
-                              <span className="mono text-cyan-300 font-bold">{musList.length} / 9 MUs</span>
-                              <span className="text-text-3 text-[10px] ml-auto">
-                                {pl.totalUnits || 85} units total
+                                key={mIdx}
+                                className="mono text-[10px] px-1.5 py-0.5 rounded bg-bg-elevated border border-border-subtle text-text-primary"
+                              >
+                                {mu !== 'Loose / None' ? `MU ${mu}` : 'Loose'}
                               </span>
-                            </button>
-
-                            {isOpen && (
-                              <div className="p-2 pt-1 border-t border-border space-y-2">
-                                <div className="text-[10px] text-text-3">
-                                  Boxes on platform ({musList.length} of 9 positions occupied):
-                                </div>
-                                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                                  {musList.map((mItem: any, mIdx: number) => (
-                                    <div key={mIdx} className="p-1.5 bg-surface-2/60 rounded border border-border-subtle text-[11px]">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-text-3 text-[10px]">Pos {mIdx + 1}:</span>
-                                          <span className="mono font-bold text-cyan-300">MU {mItem.mu}</span>
-                                        </div>
-                                        <span className="mono text-live text-[10px] font-semibold">{mItem.totalUnits || 12} units</span>
-                                      </div>
-
-                                      <div className="mt-1 space-y-1">
-                                        {mItem.items?.map((it: any, itIdx: number) => (
-                                          <div key={itIdx} className="flex items-center justify-between text-[10px] bg-bg-0/60 p-1 rounded">
-                                            <div className="truncate max-w-[170px]" title={it.skuName}>
-                                              <span className="mono font-semibold text-text-1 mr-1">{it.sku}</span>
-                                              <span className="text-text-3">{it.skuName}</span>
-                                            </div>
-                                            <span className="mono text-live font-semibold flex-none">{it.qty}u</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-4 text-center text-text-3">
-                <Boxes className="h-8 w-8 mb-2 opacity-50" />
-                <p className="text-[11px]">
-                  <b className="text-text-2">No location selected</b>
-                  <br />
-                  Select a bay on the map or a location code in the queue to inspect it here.
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 2: ORDERS MANAGEMENT ==================== */}
+        {activeTab === 'orders' && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-text-primary">Fulfillment Orders & Requirement Lines</h2>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Enter materials and quantities from checkout or customer bills. Multiple orders requiring the same material will share eligible stock observations.
                 </p>
               </div>
-            )}
-          </aside>
-        </div>
-
-        {/* BOTTOM ROW: QUEUE / OPTIMIZATION / AI ASSISTANT */}
-        <div className="grid grid-cols-[1.72fr_1.02fr_0.94fr] gap-2 min-h-0">
-          {/* FULFILLMENT QUEUE */}
-          <section className="bg-surface border border-border rounded-md flex flex-col min-h-0 overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-border min-h-[30px] flex items-center">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-text-2">Fulfillment queue</span>
+              <button
+                onClick={() => setOrderModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-xs transition"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>New Order</span>
+              </button>
             </div>
 
-            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-              <table className="w-full text-[11px] table-fixed">
-                <colgroup>
-                  <col style={{ width: '56px' }} />
-                  <col style={{ width: '72px' }} />
-                  <col style={{ width: '80px' }} />
-                  <col style={{ width: '96px' }} />
-                  <col />
-                  <col style={{ width: '108px' }} />
-                </colgroup>
+            <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden shadow-xs">
+              <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="border-b border-border text-[9px] uppercase tracking-wider text-text-3 font-semibold text-left">
-                    <th className="p-1 px-2">Priority</th>
-                    <th className="p-1 px-1">Order ID ▾</th>
-                    <th className="p-1 px-1">Time rem. ▾</th>
-                    <th className="p-1 px-1">State ▾</th>
-                    <th className="p-1 px-1">Supply source</th>
-                    <th className="p-1 px-1">Pick locations</th>
+                  <tr className="border-b border-border-subtle bg-bg-elevated text-text-secondary text-[11px] font-semibold">
+                    <th className="p-3 w-10 text-center">
+                      <span className="sr-only">Select</span>
+                    </th>
+                    <th className="p-3">Order ID</th>
+                    <th className="p-3">Priority</th>
+                    <th className="p-3">Material Lines</th>
+                    <th className="p-3 text-right">Total Units</th>
+                    <th className="p-3">Created</th>
+                    <th className="p-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
-                  {DATA.queue.rows.map(r => (
-                    <tr
-                      key={r.id}
-                      className={`hover:bg-surface-2 transition ${highlightedOrder === r.id ? 'bg-live-dim' : ''}`}
-                    >
-                      <td className="p-1.5 px-2">
-                        <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold mono ${
-                          r.prio === 1
-                            ? 'bg-crit-dim text-crit border border-crit/40'
-                            : r.prio === 2
-                            ? 'bg-warn-dim text-warn border border-warn/40'
-                            : 'bg-surface-3 text-text-2 border border-border-strong'
-                        }`}>
-                          {r.prio}
-                        </span>
-                      </td>
-                      <td className="p-1.5 px-1 mono">{r.id}</td>
-                      <td className="p-1.5 px-1 mono">{r.time}</td>
-                      <td className="p-1.5 px-1">
-                        <span className="inline-flex items-center gap-1.5 text-[11px]">
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            r.state === 'Picking' ? 'bg-live' : r.state === 'Waiting stock' ? 'bg-warn' : r.state === 'Allocated' ? 'bg-blue-300' : 'bg-text-3'
-                          }`} />
-                          {r.state}
-                        </span>
-                      </td>
-                      <td className="p-1.5 px-1 text-text-2 truncate" title={r.source}>{r.source}</td>
-                      <td className="p-1.5 px-1">
-                        {r.locs.map(l => (
+                <tbody className="divide-y divide-border-subtle">
+                  {state.orders.map(order => {
+                    const isSelected = state.selectedOrderIds.includes(order.orderId);
+                    const totalQty = order.lines.reduce((s, l) => s + l.requestedQuantity, 0);
+
+                    return (
+                      <tr
+                        key={order.orderId}
+                        className={`hover:bg-bg-elevated/60 transition ${
+                          isSelected ? 'bg-accent-dim/20' : ''
+                        }`}
+                      >
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleOrder(order.orderId)}
+                            className="rounded accent-accent h-4 w-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="p-3 font-mono font-bold text-text-primary text-sm">
+                          {order.orderId}
+                          {order.notes && (
+                            <div className="text-[10px] font-sans font-normal text-text-muted mt-0.5">
+                              {order.notes}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 font-sans">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                            order.priority === 'HIGH'
+                              ? 'bg-warn-dim text-warn border-warn/40'
+                              : 'bg-bg-elevated text-text-secondary border-border-subtle'
+                          }`}>
+                            {order.priority || 'STANDARD'}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="space-y-1">
+                            {order.lines.map(line => (
+                              <div key={line.lineId} className="flex items-center gap-2 text-[11px]">
+                                <span className="mono font-semibold text-text-primary">{line.materialSku}</span>
+                                <span className="text-text-muted">({line.materialName || 'Item'})</span>
+                                <span className="mono font-bold text-accent ml-auto">{line.requestedQuantity}u</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-text-primary">
+                          {totalQty}u
+                        </td>
+                        <td className="p-3 text-text-muted mono text-[11px]">
+                          {formatAge(order.createdAt)}
+                        </td>
+                        <td className="p-3 text-right">
                           <button
-                            key={l}
-                            onClick={() => selectLocation(l)}
-                            className="mono text-[10px] px-1.5 py-0.5 rounded border border-border-strong text-text-1 bg-surface-2 hover:border-focus hover:text-focus mr-1"
+                            onClick={() => handleDeleteOrder(order.orderId)}
+                            className="p-1 hover:text-crit text-text-muted transition"
+                            title="Delete Order"
                           >
-                            {l}
+                            <Trash2 className="h-4 w-4" />
                           </button>
-                        ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 3: STOCK OBSERVATIONS ==================== */}
+        {activeTab === 'observations' && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-text-primary">Current Stock Observations (By MU, Material & Location)</h2>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Snapshots transcribed from external &quot;Visualize Material&quot; views. Multiple SKUs can share the same MU tracking code.
+                </p>
+              </div>
+              <button
+                onClick={() => setObsModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-xs transition"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Record Stock Observation</span>
+              </button>
+            </div>
+
+            <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden shadow-xs">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-bg-elevated text-text-secondary text-[11px] font-semibold">
+                    <th className="p-3">Container MU</th>
+                    <th className="p-3">Material SKU</th>
+                    <th className="p-3">Reported Location</th>
+                    <th className="p-3 text-right">Observed Qty</th>
+                    <th className="p-3">Recorded Age</th>
+                    <th className="p-3">Notes</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {currentObservations.map(obs => {
+                    const isStale = (Date.now() - obs.observedAt) > (staleThreshold * 60 * 1000);
+                    return (
+                      <tr key={obs.observationId} className="hover:bg-bg-elevated/60 transition">
+                        <td className="p-3">
+                          {obs.muId ? (
+                            <span className="mono font-bold text-xs px-2 py-0.5 rounded bg-accent-dim text-accent border border-accent/30">
+                              MU {obs.muId}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-text-muted italic">Loose / None</span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-text-primary">
+                          {obs.materialSku}
+                        </td>
+                        <td className="p-3">
+                          {obs.location ? (
+                            <span className="mono font-semibold px-2 py-0.5 rounded bg-bg-elevated border border-border-subtle text-text-primary">
+                              {obs.location}
+                            </span>
+                          ) : (
+                            <span className="text-warn text-[11px] italic bg-warn-dim px-2 py-0.5 rounded border border-warn/30">
+                              Location unspecified
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-accent text-sm">
+                          {obs.observedQuantity}u
+                        </td>
+                        <td className="p-3 text-[11px] mono">
+                          {isStale ? (
+                            <span className="text-warn font-semibold flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatAge(obs.observedAt)} (Stale)
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">
+                              {formatAge(obs.observedAt)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-text-secondary text-[11px]">
+                          {obs.notes || '—'}
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => {
+                              setNewObsSku(obs.materialSku);
+                              setNewObsMuId(obs.muId || '');
+                              setNewObsLocation(obs.location || '');
+                              setNewObsQty(obs.observedQuantity);
+                              setObsModalOpen(true);
+                            }}
+                            className="text-accent hover:underline text-xs mr-3 font-medium"
+                          >
+                            Refresh
+                          </button>
+                          <button
+                            onClick={() => handleDeleteObservation(obs.observationId)}
+                            className="p-1 hover:text-crit text-text-muted transition"
+                            title="Delete Observation"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 4: PLANNING RUNS HISTORY ==================== */}
+        {activeTab === 'history' && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">Historical Planning Runs (Audit Log)</h2>
+              <p className="text-xs text-text-secondary mt-0.5">
+                Every calculation captures an immutable snapshot of selected orders and active observations. Historical results are never altered when observations are refreshed.
+              </p>
+            </div>
+
+            <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden shadow-xs">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-bg-elevated text-text-secondary text-[11px] font-semibold">
+                    <th className="p-3">Run ID</th>
+                    <th className="p-3">Calculated Time</th>
+                    <th className="p-3">Physical MUs</th>
+                    <th className="p-3">Allocated Pieces</th>
+                    <th className="p-3">Shortage</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {state.history.map(run => (
+                    <tr key={run.runId} className="hover:bg-bg-elevated/60 transition">
+                      <td className="p-3 mono font-bold text-accent">
+                        {run.runId}
+                      </td>
+                      <td className="p-3 text-text-muted mono text-[11px]">
+                        {new Date(run.calculatedAt).toLocaleString()} ({formatAge(run.calculatedAt)})
+                      </td>
+                      <td className="p-3 mono font-bold text-text-primary">
+                        {run.summary.totalManipulationUnitsToCollect} MUs
+                      </td>
+                      <td className="p-3 mono font-bold text-text-primary">
+                        {run.summary.totalPiecesAllocated}u
+                      </td>
+                      <td className={`p-3 mono font-bold ${run.summary.totalPiecesShortage > 0 ? 'text-crit' : 'text-text-muted'}`}>
+                        {run.summary.totalPiecesShortage > 0 ? `-${run.summary.totalPiecesShortage}u` : '0u'}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          onClick={() => {
+                            setSelectedHistoricalRun(run);
+                            setActiveTab('plan');
+                          }}
+                          className="px-2.5 py-1 rounded bg-bg-elevated border border-border-subtle hover:border-accent text-accent font-semibold text-xs transition"
+                        >
+                          Inspect Snapshot ›
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-
-            <div className="flex items-center px-3 py-1 border-t border-border text-[10px] text-text-3 mono flex-none">
-              Showing {DATA.queue.shown} of {DATA.queue.total.toLocaleString("en-US")} pending orders
-            </div>
-          </section>
-
-          {/* OPTIMIZATION COMPARISON (SIMULATED TREATMENT) */}
-          <section className="bg-surface border border-dashed border-border-strong rounded-md flex flex-col min-h-0 overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-border min-h-[30px] flex items-center gap-2 flex-wrap flex-none">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-text-2">Baseline vs. Proposal 4a</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-2 border border-dashed border-border-strong rounded px-1.5 py-0.5">
-                Simulated
-              </span>
-              <span className="text-[10px] text-text-3 mono ml-auto">
-                {simRun === 1 ? 'SIM-2042' : DATA.sim.runId} · seed {simRun === 1 ? 50617 : DATA.sim.seed} · {DATA.sim.horizonH} h
-              </span>
-            </div>
-
-            <div className="flex-1 p-2 px-3 overflow-auto min-h-0">
-              {simBusy ? (
-                <div className="flex flex-col gap-2 pt-1">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="skel h-4" style={{ width: `${90 - i * 8}%` }} />
-                  ))}
-                </div>
-              ) : (
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-border text-[10px] uppercase tracking-wider text-text-3 font-semibold text-left">
-                      <th className="p-1">Metric</th>
-                      <th className="p-1 text-right mono">Baseline</th>
-                      <th className="p-1 text-right mono">{DATA.sim.proposal}</th>
-                      <th className="p-1 text-right mono">Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {DATA.sim.metrics.map(m => (
-                      <tr key={m.name}>
-                        <td className="p-1 text-text-1">
-                          {m.name} {m.unit && <span className="text-text-3">({m.unit})</span>}
-                        </td>
-                        <td className="p-1 text-right mono text-text-1">{m.base}</td>
-                        <td className="p-1 text-right mono text-text-1">{m.prop}</td>
-                        <td className="p-1 text-right mono text-live font-semibold">{m.delta}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {simRun === 1 && (
-              <div className="m-2 mt-0 p-1 px-2 border border-dashed border-border-strong rounded text-[10px] text-text-3">
-                Simulation complete — values verified against golden snapshot
-              </div>
-            )}
-          </section>
-
-          {/* AI OPERATIONS ASSISTANT */}
-          <section className="bg-surface border border-border rounded-md flex flex-col min-h-0 overflow-hidden" style={{ background: 'linear-gradient(0deg, rgba(129,140,248,.07), rgba(129,140,248,.07)), #101828' }}>
-            <div className="px-3 py-1.5 border-b border-border min-h-[30px] flex items-center justify-between flex-none">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-text-2">AI Operations Assistant</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider text-ai border border-ai/40 rounded px-1.5 py-0.5">
-                <Sparkles className="h-2.5 w-2.5" /> AI
-              </span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 min-h-0 text-[11px]">
-              <div>
-                <h4 className="text-[10px] uppercase tracking-wider text-text-3 mb-0.5 font-semibold">Observation</h4>
-                <p className="text-text-1 leading-relaxed">{DATA.ai.observation}</p>
-              </div>
-
-              <div>
-                <h4 className="text-[10px] uppercase tracking-wider text-text-3 mb-1 font-semibold">Evidence</h4>
-                <div className="flex flex-wrap gap-1">
-                  {DATA.ai.evidence.map(e => (
-                    <button
-                      key={e}
-                      onClick={() => {
-                        if (parseLoc(e)) selectLocation(e);
-                        else if (e.startsWith('ORD-')) setHighlightedOrder(e);
-                      }}
-                      className="text-[10px] mono px-1.5 py-0.5 rounded border border-ai/35 text-ai bg-indigo-500/10 hover:border-ai hover:text-indigo-200 transition"
-                    >
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-[10px] uppercase tracking-wider text-text-3 mb-0.5 font-semibold">Proposed plan</h4>
-                <div className="border border-warn/55 rounded bg-warn-dim p-2">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-warn flex items-center gap-1 mb-0.5">
-                    <Clock className="h-3 w-3" />
-                    <span>{modalApproved ? 'Approved — replenishment queued for 14:00' : 'Proposed — awaiting approval'}</span>
-                  </div>
-                  <p className="text-text-1 text-[11px] leading-relaxed">{DATA.ai.plan}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2 p-3 pt-0 flex-none">
-              <button
-                onClick={() => setModalOpen(true)}
-                className="h-7 px-3 rounded text-[11px] font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
-              >
-                Review Plan
-              </button>
-              <button
-                onClick={handleSimulate}
-                disabled={simBusy}
-                className="h-7 px-3 rounded text-[11px] font-semibold border border-border-strong text-text-1 hover:border-text-3 transition disabled:opacity-50"
-              >
-                {simBusy ? 'Simulating…' : 'Simulate'}
-              </button>
-            </div>
-          </section>
-        </div>
-      </>
-    )}
-
-        {/* ==================== FOOTER ==================== */}
-        <footer className="flex items-center gap-4 bg-surface border border-border rounded-md px-3 text-[10px] text-text-3 overflow-hidden whitespace-nowrap">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-live" /> Live · synchronized
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm border border-dashed border-text-2" /> Simulated · run ID + seed
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm bg-indigo-500/35 border border-ai/50" /> AI-generated
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm border border-warn bg-warn-dim" /> Proposed · awaiting approval
-          </span>
-
-          <span className="ml-auto flex items-center gap-3">
-            {!feedErrorDismissed && (
-              <span className="text-crit flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
-                Transfer feed MKT-03 unavailable — retrying
-                <button onClick={() => setFeedErrorDismissed(true)} className="underline underline-offset-2 ml-1 text-crit">
-                  Dismiss
-                </button>
-              </span>
-            )}
-          </span>
-        </footer>
+          </div>
+        )}
       </main>
 
-      {/* ==================== REVIEW PLAN MODAL ==================== */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="w-[520px] max-h-[640px] bg-surface border border-border-strong rounded-md flex flex-col shadow-2xl">
-            <div className="flex items-center gap-2 p-3 px-4 border-b border-border">
-              <h2 className="text-[13px] font-semibold text-text-1">Review proposed plan</h2>
-              <span className="text-[10px] px-2 py-0.5 rounded border border-warn/40 bg-warn-dim text-warn ml-2">
-                Awaiting approval
-              </span>
-              <button onClick={() => setModalOpen(false)} className="ml-auto text-text-2 hover:text-text-1">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex flex-col gap-3 text-xs leading-relaxed">
-              <div className="flex gap-3 text-[11px] text-text-2 mono flex-wrap">
-                <span>Source run <b className="text-text-1">{simResults ? simResults.runId : 'SIM-2041'}</b></span>
-                <span>Affected orders <b className="text-text-1">{facility.orders.length}</b></span>
-                <span>Window <b className="text-text-1">13:00–14:00</b></span>
-              </div>
-
-              <ol className="list-decimal pl-5 space-y-1.5 text-text-1">
-                <li>Consolidate multi-order picks targeting the same 6-digit MU (e.g. MU 502900).</li>
-                <li>Eliminate Level A ground platform pull-out penalties (18s saved per consolidated pick).</li>
-                <li>Hold wave release until high-density wave grouping confirms.</li>
-              </ol>
-
-              <label className="flex items-start gap-2 p-2 border border-border rounded bg-bg-1 cursor-pointer text-[11px] text-text-2 mt-1">
-                <input
-                  type="checkbox"
-                  checked={reviewChecked}
-                  onChange={e => setReviewChecked(e.target.checked)}
-                  className="mt-0.5 accent-live"
-                />
-                <span>I reviewed the simulation results and the affected orders.</span>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border">
-              <button
-                onClick={() => setModalOpen(false)}
-                className="h-7 px-3 rounded text-[11px] font-semibold border border-border-strong text-text-1 hover:border-text-3 transition"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={!reviewChecked}
-                onClick={() => {
-                  setModalApproved(true);
-                  setModalOpen(false);
-                }}
-                className="h-7 px-3 rounded text-[11px] font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Approve
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ==================== ALLOCATE MATERIAL MODAL ==================== */}
-      {allocateModalOpen && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-          <div className="w-[500px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
-              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
-                <PackagePlus className="h-4 w-4 text-live" />
-                Allocate Materials to Manipulation Unit (MU)
-              </h2>
-              <button onClick={() => setAllocateModalOpen(false)} className="text-text-3 hover:text-text-1">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    MU Number (6 Digits)
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={newMuId}
-                    onChange={e => setNewMuId(e.target.value.replace(/\D/g, ''))}
-                    placeholder="e.g. 502900"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Target Rack Location
-                  </label>
-                  <input
-                    type="text"
-                    value={newLocationCode}
-                    onChange={e => setNewLocationCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. EH14A, EC07A"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                  Platform Slot
-                </label>
-                <select
-                  value={newPlatformSlot}
-                  onChange={e => setNewPlatformSlot(e.target.value)}
-                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
-                >
-                  <option value="plat_1">Platform 1 (Ground Manual Pull - 18s extraction)</option>
-                  <option value="plat_2">Platform 2 (Rear / Inner Cage - 25s shuffle)</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2.5">
-                <div className="col-span-2">
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    SKU Code
-                  </label>
-                  <input
-                    type="text"
-                    value={newSku}
-                    onChange={e => setNewSku(e.target.value)}
-                    placeholder="e.g. 1524289001"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Pack Units
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={newQty}
-                    onChange={e => setNewQty(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Item Name / Description
-                  </label>
-                  <input
-                    type="text"
-                    value={newSkuName}
-                    onChange={e => setNewSkuName(e.target.value)}
-                    placeholder="e.g. Athletic Tee Slim - S"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Lot Number
-                  </label>
-                  <input
-                    type="text"
-                    value={newLot}
-                    onChange={e => setNewLot(e.target.value)}
-                    placeholder="e.g. LOT-A99"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="p-2.5 bg-bg-1/80 border border-border/80 rounded text-[11px] text-text-3 leading-relaxed">
-                <span className="text-live font-semibold">Note:</span> Each level holds 2 platforms with up to 9 MUs per platform (18 boxes total). Adding units appends an immutable transaction to the append-only stock balance ledger.
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
-              <button
-                onClick={() => setAllocateModalOpen(false)}
-                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAllocateMaterial}
-                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
-              >
-                Save & Stock MU
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ==================== CREATE CUSTOMER ORDER MODAL ==================== */}
+      {/* ==================== CREATE ORDER MODAL ==================== */}
       {orderModalOpen && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-          <div className="w-[460px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
-              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
-                <Plus className="h-4 w-4 text-live" />
-                Create New Fulfillment Order
-              </h2>
-              <button onClick={() => setOrderModalOpen(false)} className="text-text-3 hover:text-text-1">
-                <X className="h-4 w-4" />
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-lg bg-bg-surface border border-border-strong rounded-lg shadow-xl overflow-hidden flex flex-col">
+            <div className="p-3.5 px-4 border-b border-border-subtle bg-bg-elevated flex items-center justify-between">
+              <h3 className="font-semibold text-sm text-text-primary">Create Fulfillment Order</h3>
+              <button onClick={() => setOrderModalOpen(false)} className="text-text-muted hover:text-text-primary">
+                ✕
               </button>
             </div>
 
-            <div className="p-4 space-y-3.5 text-xs">
+            <form onSubmit={handleCreateOrder} className="p-4 space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Order ID (9 Digits)
+                  <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                    Order ID (from checkout) *
                   </label>
                   <input
                     type="text"
-                    maxLength={9}
+                    required
                     value={newOrderId}
-                    onChange={e => setNewOrderId(e.target.value.replace(/\D/g, ''))}
-                    placeholder="000815302"
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                    onChange={e => setNewOrderId(e.target.value)}
+                    placeholder="e.g. 000815299"
+                    className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 mono text-text-primary outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                  <label className="block text-[11px] font-medium text-text-secondary mb-1">
                     Priority Tier
                   </label>
                   <select
                     value={newOrderPriority}
                     onChange={e => setNewOrderPriority(e.target.value as any)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
+                    className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 text-text-primary outline-none focus:border-accent"
                   >
+                    <option value="STANDARD">STANDARD</option>
                     <option value="HIGH">HIGH (Urgent SLA)</option>
-                    <option value="STANDARD">STANDARD (Shift SLA)</option>
+                    <option value="LOW">LOW</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                  Requested Material SKU
-                </label>
-                <select
-                  value={newOrderSku}
-                  onChange={e => setNewOrderSku(e.target.value)}
-                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                >
-                  {facility.manipulationUnits.flatMap(m => m.items).map((item, idx) => (
-                    <option key={idx} value={item.sku}>
-                      {item.sku} — {item.skuName} ({item.quantityUnits}u available)
-                    </option>
-                  ))}
-                  <option value="1524289001">1524289001 — Athletic Tee Slim S</option>
-                  <option value="1524289002">1524289002 — Athletic Tee Slim M</option>
-                  <option value="1524289003">1524289003 — Athletic Tee Slim L</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                  Requested Units (Piece-Pick)
+                <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                  Order Notes / External Reference
                 </label>
                 <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={newOrderQty}
-                  onChange={e => setNewOrderQty(parseInt(e.target.value, 10) || 1)}
-                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  type="text"
+                  value={newOrderNotes}
+                  onChange={e => setNewOrderNotes(e.target.value)}
+                  placeholder="e.g. Customer billing reference, rush handling"
+                  className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 text-text-primary outline-none focus:border-accent"
                 />
               </div>
 
-              <div className="p-2.5 bg-bg-1/80 border border-border/80 rounded text-[11px] text-text-3 leading-relaxed">
-                Orders with identical items stored in the same MU can be evaluated in simulation to compare standard discrete picking against batch-wave grouping.
-              </div>
-            </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-medium text-text-secondary">
+                    Material Requirement Lines *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewOrderLines(prev => [...prev, { sku: '', name: '', qty: 1 }])}
+                    className="text-accent hover:underline text-[11px] font-semibold"
+                  >
+                    + Add Another Line
+                  </button>
+                </div>
 
-            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
-              <button
-                onClick={() => setOrderModalOpen(false)}
-                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateOrder}
-                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
-              >
-                Add Order to Queue
-              </button>
-            </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-border-subtle rounded p-2 bg-bg-elevated">
+                  {newOrderLines.map((line, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        required
+                        list="known-skus"
+                        value={line.sku}
+                        onChange={e => {
+                          const skuVal = e.target.value;
+                          const match = knownMaterials.find(m => m.sku === skuVal);
+                          setNewOrderLines(prev => {
+                            const copy = [...prev];
+                            copy[idx] = { ...copy[idx], sku: skuVal, name: match ? match.name : copy[idx].name };
+                            return copy;
+                          });
+                        }}
+                        placeholder="Material SKU"
+                        className="flex-1 bg-bg-surface border border-border-subtle rounded px-2 py-1 mono text-text-primary text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={line.name}
+                        onChange={e => {
+                          const nameVal = e.target.value;
+                          setNewOrderLines(prev => {
+                            const copy = [...prev];
+                            copy[idx] = { ...copy[idx], name: nameVal };
+                            return copy;
+                          });
+                        }}
+                        placeholder="Description (optional)"
+                        className="flex-1 bg-bg-surface border border-border-subtle rounded px-2 py-1 text-text-primary text-xs"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        required
+                        value={line.qty}
+                        onChange={e => {
+                          const val = parseInt(e.target.value, 10) || 1;
+                          setNewOrderLines(prev => {
+                            const copy = [...prev];
+                            copy[idx] = { ...copy[idx], qty: val };
+                            return copy;
+                          });
+                        }}
+                        className="w-16 bg-bg-surface border border-border-subtle rounded px-2 py-1 mono text-text-primary text-xs text-right"
+                      />
+                      {newOrderLines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setNewOrderLines(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-text-muted hover:text-crit p-1"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <datalist id="known-skus">
+                  {knownMaterials.map(m => (
+                    <option key={m.sku} value={m.sku}>{m.name}</option>
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => setOrderModalOpen(false)}
+                  className="px-3 py-1.5 rounded border border-border-subtle text-text-secondary hover:bg-bg-elevated"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded bg-accent hover:bg-accent-hover text-white font-semibold transition"
+                >
+                  Save Order
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* ==================== CONFIGURE LAYOUT BLUEPRINT MODAL ==================== */}
-      {layoutModalOpen && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-          <div className="w-[520px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
-              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
-                <Sliders className="h-4 w-4 text-live" />
-                Configure Physical Facility Dimensions
-              </h2>
-              <button onClick={() => setLayoutModalOpen(false)} className="text-text-3 hover:text-text-1">
-                <X className="h-4 w-4" />
+      {/* ==================== RECORD OBSERVATION MODAL ==================== */}
+      {obsModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-md bg-bg-surface border border-border-strong rounded-lg shadow-xl overflow-hidden flex flex-col">
+            <div className="p-3.5 px-4 border-b border-border-subtle bg-bg-elevated flex items-center justify-between">
+              <h3 className="font-semibold text-sm text-text-primary">Record Stock Observation</h3>
+              <button onClick={() => setObsModalOpen(false)} className="text-text-muted hover:text-text-primary">
+                ✕
               </button>
             </div>
 
-            <div className="p-4 space-y-3.5 text-xs">
+            <form onSubmit={handleSaveObservation} className="p-4 space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Number of Rows (A–Z)
+                  <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                    MU / Box Code (Optional)
                   </label>
                   <input
-                    type="number"
-                    min={1}
-                    max={26}
-                    value={layoutRowCount}
-                    onChange={e => setLayoutRowCount(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                    type="text"
+                    value={newObsMuId}
+                    onChange={e => setNewObsMuId(e.target.value)}
+                    placeholder="e.g. 502900 (or blank)"
+                    className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 mono text-text-primary outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Default Bays per Row
+                  <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                    Location (Optional)
                   </label>
                   <input
-                    type="number"
-                    min={4}
-                    max={30}
-                    value={layoutBaysPerRow}
-                    onChange={e => setLayoutBaysPerRow(parseInt(e.target.value, 10) || 4)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                    type="text"
+                    value={newObsLocation}
+                    onChange={e => setNewObsLocation(e.target.value)}
+                    placeholder="e.g. EC07A (or blank)"
+                    className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 mono text-text-primary outline-none focus:border-accent"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Bay Width (Meters)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0.8}
-                    max={3.0}
-                    value={layoutBayWidth}
-                    onChange={e => setLayoutBayWidth(parseFloat(e.target.value) || 1.2)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
-                    Aisle Spacing (Meters)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={1.5}
-                    max={5.0}
-                    value={layoutAisleWidth}
-                    onChange={e => setLayoutAisleWidth(parseFloat(e.target.value) || 2.8)}
-                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                  Material SKU *
+                </label>
+                <input
+                  type="text"
+                  required
+                  list="known-skus-obs"
+                  value={newObsSku}
+                  onChange={e => setNewObsSku(e.target.value)}
+                  placeholder="e.g. 1524289001"
+                  className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 mono text-text-primary outline-none focus:border-accent"
+                />
+                <datalist id="known-skus-obs">
+                  {knownMaterials.map(m => (
+                    <option key={m.sku} value={m.sku}>{m.name}</option>
+                  ))}
+                </datalist>
               </div>
 
-              <div className="p-3 bg-bg-1/80 border border-border rounded text-[11px] text-text-2 space-y-1">
-                <div>Calculated Storage Capacity:</div>
-                <div className="mono font-semibold text-live">
-                  {layoutRowCount * layoutBaysPerRow * 4} total shelf locations ({layoutRowCount * layoutBaysPerRow * 4 * 18} max MUs)
-                </div>
-                <div className="text-[10px] text-text-3">
-                  All coordinates (X, Y, Z) and travel distances are dynamically derived through LayoutEngine.
-                </div>
+              <div>
+                <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                  Observed Quantity *
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  required
+                  value={newObsQty}
+                  onChange={e => setNewObsQty(parseInt(e.target.value, 10) || 0)}
+                  className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 mono text-text-primary outline-none focus:border-accent"
+                />
               </div>
-            </div>
 
-            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
-              <button
-                onClick={() => setLayoutModalOpen(false)}
-                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveLayout}
-                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
-              >
-                Regenerate Blueprint
-              </button>
-            </div>
+              <div>
+                <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                  Observation Source / Notes
+                </label>
+                <input
+                  type="text"
+                  value={newObsNotes}
+                  onChange={e => setNewObsNotes(e.target.value)}
+                  placeholder="e.g. Checked front display tier, reported in checkout system"
+                  className="w-full bg-bg-elevated border border-border-subtle rounded px-2.5 py-1.5 text-text-primary outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="p-2.5 rounded bg-bg-elevated text-[11px] text-text-muted leading-relaxed">
+                <span className="font-semibold text-text-secondary">Deduplication Rule:</span> A new observation for the same MU and SKU updates that item&apos;s count without affecting other materials in the same container.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => setObsModalOpen(false)}
+                  className="px-3 py-1.5 rounded border border-border-subtle text-text-secondary hover:bg-bg-elevated"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded bg-accent hover:bg-accent-hover text-white font-semibold transition"
+                >
+                  Save Observation
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Fulcrum — Warehouse Fulfillment Simulation & Optimization',
-  description: 'Simulation-first warehouse fulfillment optimization control tower',
+  title: 'Fulcrum — Order-Specific Material Planning',
+  description: 'Fast, personal order-fulfillment planning tool with offline stock observations',
 };
 
 export default function RootLayout({
@@ -12,8 +12,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-canvas text-slate-100 min-h-screen antialiased flex flex-col font-sans">
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="bg-bg-app text-text-primary min-h-screen antialiased flex flex-col font-sans transition-colors duration-150">
         {children}
       </body>
     </html>
