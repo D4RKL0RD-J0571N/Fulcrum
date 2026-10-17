@@ -3,30 +3,78 @@
 @tailwind utilities;
 
 :root {
-  --bg-0: #0B1220;
-  --bg-1: #0E1626;
-  --surface: #101828;
-  --surface-2: #141E30;
-  --surface-3: #18253C;
-  --border: #1F2C44;
-  --border-strong: #2E3F5F;
-  --text-1: #E6ECF5;
-  --text-2: #9AA8BE;
-  --text-3: #5F7089;
-  --live: #2DD4BF;
-  --live-dim: rgba(45, 212, 191, 0.13);
-  --warn: #FBBF24;
-  --warn-dim: rgba(251, 191, 36, 0.12);
-  --crit: #F87171;
-  --crit-dim: rgba(248, 113, 113, 0.12);
-  --ai: #A5B4FC;
-  --ai-tint: rgba(129, 140, 248, 0.07);
-  --focus: #67E8F9;
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f1f5f9;
+  --bg-subtle: #f8fafc;
+  --bg-muted: #e2e8f0;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --accent-dim: rgba(13, 148, 136, 0.12);
+  --warn: #d97706;
+  --warn-dim: rgba(217, 119, 6, 0.12);
+  --crit: #dc2626;
+  --crit-dim: rgba(220, 38, 38, 0.12);
+  --success: #16a34a;
+  --success-dim: rgba(22, 163, 74, 0.12);
+
+  /* Legacy mappings */
+  --bg-0: var(--bg-app);
+  --bg-1: var(--bg-surface-elevated);
+  --surface: var(--bg-surface);
+  --surface-2: var(--bg-surface-elevated);
+  --surface-3: var(--bg-muted);
+  --border: var(--border-subtle);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+  --live: var(--accent);
+  --live-dim: var(--accent-dim);
+}
+
+.dark {
+  --bg-app: #0b0f17;
+  --bg-surface: #111827;
+  --bg-surface-elevated: #162032;
+  --bg-subtle: #141d2e;
+  --bg-muted: #1e293b;
+  --border-subtle: #1f293d;
+  --border-strong: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #14b8a6;
+  --accent-hover: #2dd4bf;
+  --accent-dim: rgba(20, 184, 166, 0.18);
+  --warn: #f59e0b;
+  --warn-dim: rgba(245, 158, 11, 0.15);
+  --crit: #ef4444;
+  --crit-dim: rgba(239, 68, 68, 0.15);
+  --success: #22c55e;
+  --success-dim: rgba(34, 197, 94, 0.15);
+
+  /* Legacy mappings */
+  --bg-0: var(--bg-app);
+  --bg-1: var(--bg-surface-elevated);
+  --surface: var(--bg-surface);
+  --surface-2: var(--bg-surface-elevated);
+  --surface-3: var(--bg-muted);
+  --border: var(--border-subtle);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+  --live: var(--accent);
+  --live-dim: var(--accent-dim);
 }
 
 body {
-  background-color: var(--bg-0);
-  color: var(--text-1);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -34,29 +82,97 @@ body {
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
 }
 
 ::selection {
-  background: rgba(45, 212, 191, 0.25);
+  background: var(--accent-dim);
+  color: var(--text-primary);
 }
 
-.live-pulse {
-  animation: pulse 2s infinite;
+/* ==================== PRINT STYLES FOR FLOOR COLLECTION SHEET ==================== */
+@media print {
+  /* Hide non-printable elements: header, navigation, action buttons, forms, and dialogs */
+  header,
+  nav,
+  button,
+  .no-print,
+  .theme-toggle,
+  [role="dialog"],
+  .fixed,
+  input[type="text"],
+  select {
+    display: none !important;
+  }
+
+  /* Reset layout containers for clear paper rendering */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+    line-height: 1.3 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  main {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Force high-contrast text and clean borders */
+  * {
+    color: #000000 !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    border-color: #94a3b8 !important;
+  }
+
+  /* Ensure conflict warnings, shortages, and badges remain bold and visible on print */
+  .print-conflict-warning,
+  .text-crit,
+  .text-warn {
+    color: #b91c1c !important;
+    font-weight: 700 !important;
+  }
+
+  /* Checkbox print appearance */
+  input[type="checkbox"] {
+    display: inline-block !important;
+    appearance: auto !important;
+    width: 14px !important;
+    height: 14px !important;
+    border: 1px solid #000000 !important;
+  }
+
+  /* Dedicated print-only banner */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Page break rules */
+  @page {
+    margin: 1.2cm;
+    size: portrait;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 4pt 6pt !important;
+  }
 }
 
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.5); }
-  50% { box-shadow: 0 0 0 4px rgba(45, 212, 191, 0); }
-}
-
-.skel {
-  border-radius: 4px;
-  background: linear-gradient(90deg, #141E30 25%, #18253C 50%, #141E30 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
-}
-
-@keyframes shimmer {
-  to { background-position: -200% 0; }
-}
