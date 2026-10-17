@@ -2,91 +2,79 @@
 
 ## 1. Architectural Philosophy
 
-Fulcrum adopts **Clean Architecture** principles combined with **Pragmatic Domain-Driven Design (DDD)**. The system isolates business logic from UI frameworks, persistence mechanisms, and AI providers.
+Fulcrum adopts **Clean Architecture** combined with pragmatic **Domain-Driven Design (DDD)**. The system isolates pure fulfillment planning and business invariants from presentation frameworks, local storage mechanisms, and external persistence adapters.
 
-```
-       +-------------------------------------------------------+
-       |                   Presentation Layer                  |
-       |        (Next.js App Router, React, Tailwind, UI)      |
-       +-------------------------------------------------------+
-                                  |
-                                  v
-       +-------------------------------------------------------+
-       |                    Application Layer                  |
-       |      (Use Cases, Commands, Queries, Orchestrators)    |
-       +-------------------------------------------------------+
-            |                     |                     |
-            v                     v                     v
-+-----------------------+ +--------------------+ +-------------------+
-|     Domain Layer      | | Simulation Adapter | |  AI Tool Adapter  |
-| (Pure Models, Rules,  | | (packages/         | | (Mock Provider,   |
-|  Ledger, Layout Engine| |  sim-engine)       | |  Tool Executor)   |
-+-----------------------+ +--------------------+ +-------------------+
-            ^
-            |
-+------------------------------------------------------+
-|                  Persistence Layer                   |
-|  - Phase A: In-Memory Deterministic Repositories     |
-|  - Phase B: Supabase (PostgreSQL + RLS + Migrations) |
-+------------------------------------------------------+
+```text
+                           +-------------------------------------+
+                           |         Presentation Layer          |
+                           |    apps/web (Next.js 14 App Router) |
+                           |  - Order Intake & Material Views    |
+                           |  - Collection Plan & Floor Checklist|
+                           |  - @media print Stylesheet          |
+                           +-------------------------------------+
+                                              │
+                                              ▼
+                           +-------------------------------------+
+                           |          Application Layer          |
+                           |   Planning Store & State Container  |
+                           |   Isolated localStorage Checklist   |
+                           +-------------------------------------+
+                                              │
+                                              ▼
+                           +-------------------------------------+
+                           |             Domain Layer            |
+                           |   packages/domain (Pure TypeScript) |
+                           |  - OrderMaterialPlanner             |
+                           |  - resolveCurrentObservations       |
+                           |  - MU Location Conflict Guards      |
+                           +-------------------------------------+
+                                       /              \
+                                      /                \
+                                     v                  v
+                 +-----------------------+  +-----------------------+
+                 |   Simulation Engine   |  |   Persistence Layer   |
+                 |  - @fulcrum/sim-engine|  |  - In-Memory Repos    |
+                 |  - Fulcrum.SimWorker  |  |  - Supabase / Postgres|
+                 +-----------------------+  +-----------------------+
 ```
 
 ---
 
 ## 2. Core Layers and Responsibilities
 
-### 2.1 Domain Layer (`packages/domain` or `src/domain`)
-- **Zero External Dependencies:** Pure TypeScript. No React, Next.js, Supabase, Prisma, or AI SDK imports.
-- **Aggregates & Entities:**
-  - `WarehouseLayout`: Versioned configuration, template parsing, formatting, coordinate projection, distance calculation.
-  - `Location`, `Platform`, `ManipulationUnit (MU)`, `Material`.
-  - `StockLedgerEntry`, `StockReservation`: Immutable transaction log and reservation entities.
-  - `Order`, `LineItem`, `FulfillmentTask`: Demand entities with priority and status lifecycles.
-- **Invariants:** Business validation enforced at entity creation and state transitions.
+### 2.1 Domain Layer (`packages/domain`)
+- **Zero External Dependencies**: Pure TypeScript without frameworks, UI libraries, or database SDKs.
+- **`OrderMaterialPlanner`**: Deterministic allocation engine that consolidates multi-order demand, matches against active stock observations, and groups extractions into physical Manipulation Unit (MU) collection tasks.
+- **Observation Resolver (`resolveCurrentObservations`)**: Normalizes locations and MU keys, supersedes older observations with newer snapshots, and preserves distinct stock across physical locations.
+- **Conflict & Readiness Guarding**: Detects contradictory locations for identical physical MUs, prevents silent resolution, and guards plan execution readiness.
 
-### 2.2 Application Layer (`src/application`)
-- **Use Cases / Service Contracts:**
-  - `CreateLayoutVersionUseCase`, `ParseLocationQueryUseCase`.
-  - `ExecuteStockMovementUseCase`, `CreateReservationUseCase`.
-  - `TriggerSimulationRunUseCase`, `CompareSimulationScenariosUseCase`.
-  - `ProposePlanUseCase`, `ReviewPlanUseCase`, `ApprovePlanUseCase`, `CommitPlanUseCase`.
-- **Repository Interfaces:** Defined here, consumed by use cases, implemented by the persistence layer.
+### 2.2 Presentation Layer (`apps/web`)
+- **Next.js 14 App Router**: Fast, responsive client-side interface built with Tailwind CSS.
+- **Focused Desk-Side Views**:
+  - **Orders Tab**: Intake and review of customer order requirements ("Visualize Order").
+  - **Stock Tab**: Ingestion and review of externally reported inventory snapshots ("Visualize Material").
+  - **Plan Tab**: Structured collection plan showing distinct physical MUs, extraction line items, order destinations, and operational warning banners.
+- **Print Optimization**: Dedicated `@media print` rules in `globals.css` that strip navigation chrome, search inputs, and modal controls, rendering clean, high-contrast collection plans with page-break protection.
+- **Touch-Friendly Floor Checklist**: Interactive checklist allowing operators to mark off physical MUs and extraction lines while on the floor.
 
-### 2.3 Persistence / Adapter Layer (`src/infrastructure/repositories`)
-- **Phase A (Showcase):** In-memory repositories implementing repository interfaces, pre-populated with deterministic seed data generated from the active layout.
-- **Phase B (Production):** Supabase PostgreSQL repository implementations enforcing Row-Level Security (RLS) based on authenticated session workspace claims.
+### 2.3 Application State & Floor Checklist Isolation
+- **Planning State (`planningStore`)**: Manages the collection of orders, active observations, selected order IDs, and calculation history.
+- **Checklist State Isolation**:
+  - The floor checklist state (`checkedTasks`, `checkedItems`) is decoupled from planning calculations and inventory records.
+  - Persisted in browser `localStorage` keyed by `fulcrum_checklist_${runId}`.
+  - Checking or unchecking tasks **never** mutates stock observations, decrements balances, or recalculates the current plan.
 
-### 2.4 Simulation Boundary (`packages/sim-engine`)
-- **Independent Package:** Has zero awareness of web components, databases, or location code strings.
-- **Snapshot Contract:** Application creates an immutable snapshot of locations, MUs, stock, and demand, serializing it with a SHA-256 hash.
-- **Location Abstraction:** Locations exist in the simulation solely as `{ id: string, x: number, y: number, z: number, accessType: 'manual' | 'forklift' | 'any', capacity: number, isBlocked: boolean }`.
-- **Phase A / Phase B Parity:** The TypeScript engine in Phase A and the C# engine in Phase B accept the exact same Zod/JSON input contract and emit the exact same output metrics.
-
-### 2.5 AI Integration Boundary (`src/infrastructure/ai`)
-- **Strictly Sandboxed:** The AI provider interacts through typed tools (`search_locations`, `inspect_bay_contention`, `propose_mitigation_plan`).
-- **Read/Write Segregation:** Read tools query application projections. Write tools submit proposals to the `PlanLifecycle` service; they never mutate operational records directly.
-- **Evidence Linking:** Every generated recommendation must reference entity keys (`location_code`, `mu_id`, `order_id`, `simulation_run_id`).
+### 2.4 Foundational Simulation & Worker Layer (`packages/sim-engine`, `workers/sim-worker`)
+- Maintained as deterministic discrete-event simulation engines in TypeScript and C# .NET 9.
+- Used for warehouse-level physical congestion modeling (deep-bay forklift contention, multi-tier platform retrieval delays) with golden-file regression test parity.
 
 ---
 
-## 3. Multi-Tenancy Model
-
-Multi-tenancy is designed into every layer from day one:
-- Every entity, aggregate, and query includes `workspace_id`.
-- Phase A sets a static seeded workspace: `ws_default`.
-- Role-based permissions model:
-  - `admin`: Manage warehouse layouts, workspace settings, commit plans.
-  - `planner`: Run simulations, create reservations, propose/review plans.
-  - `viewer`: Read-only access to maps, orders, stock projections, and simulation reports.
-
----
-
-## 4. Architectural Boundaries Summary
+## 3. Data Contracts and Boundaries
 
 | Boundary | Inbound | Outbound | Data Contract |
 |---|---|---|---|
-| **Web -> Application** | User actions, HTTP requests | JSON DTOs | Typed DTOs, validated with Zod |
-| **Application -> Domain** | Method calls on aggregates | Domain events / Entities | Domain Objects & Value Objects |
-| **Application -> Persistence** | Repository method calls | Hydrated entities | Repository Interfaces |
-| **Application -> Simulation** | Run execution request | Simulation run result | Versioned Input/Output Snapshot |
-| **Application -> AI** | Context & prompt | Tool call requests / Plans | Zod-validated Tool Schemas |
+| **Web UI -> Application Store** | User actions (order toggle, observation entry) | Updated React state | `PlanningAppState` |
+| **Application Store -> Domain** | `Order[]`, `selectedOrderIds`, `StockObservation[]` | Calculated plan & warnings | `PlanningRun` (`ManipulationUnitPickTask[]`, `PlanningSummary`) |
+| **Checklist -> Local Storage** | Task & item toggle actions | Serialized checklist map | `fulcrum_checklist_${runId}` JSON |
+| **Web -> Print Subsystem** | Print command / Ctrl+P | High-contrast physical printout | CSS `@media print` styles (`.print-avoid-break`, `.no-print`) |

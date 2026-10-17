@@ -38,6 +38,30 @@ This document records ambiguities, trade-offs, and assumptions made during desig
   - Implemented 2D top-down plan view with real-time heatmaps and a slide-out rack elevation drawer.
   - Bound all percentages, travel distances, and pick times to genuine deterministic simulation runs.
 
+### OQ-005: Physical Manipulation Unit (MU) Identity vs. Material Piece Quantities
+- **Initial Ambiguity:** Does an allocated quantity represent an individual item, a package, or an entire physical Manipulation Unit? Does collecting an MU automatically fulfill demand, or can an MU contain multiple SKUs across multiple orders?
+- **Resolution (Implemented & Verified):**
+  - An MU represents a discrete physical handling unit (container/box), typically tracked by a 6-digit code.
+  - An MU can hold multiple distinct SKUs and can contribute portions of its inventory to multiple customer orders.
+  - The planner explicitly reports **total distinct physical MUs to collect** separately from **total material pieces to extract**.
+  - Loose/uncontainerized stock is supported with `isLooseStock: true`; it contributes to piece extractions but is never counted as an MU container.
+
+### OQ-006: Handling Conflicting MU Locations in Offline Observations
+- **Initial Ambiguity:** If offline observations report the same physical MU identifier in two different warehouse locations, should the system pick the latest observation, choose the closer location, or split the MU?
+- **Resolution (Implemented & Verified):**
+  - An MU cannot physically exist in two places simultaneously.
+  - The planner emits a `CONFLICTING_MU_LOCATION` warning and lists all reported locations.
+  - **Singularity is preserved**: exactly one physical MU task is created and counted once. The system never duplicates the MU or silently guesses a location.
+  - **Readiness is guarded**: sets `isPlanExecutable = false` and `hasUnresolvedConflicts = true`, alerting the operator to resolve the conflict at the desk prior to floor dispatch.
+  - A known location combined with an unspecified location is treated as incomplete data, not a conflict.
+
+### OQ-007: Floor Collection Checklist State Decoupling
+- **Initial Ambiguity:** When an operator marks an MU or line item as collected on the floor checklist, should this action mutate stock balances or trigger plan recalculations?
+- **Resolution (Implemented & Verified):**
+  - Floor collection checklist state is strictly decoupled from planning inputs, observations, and allocation logic.
+  - Checklist state is maintained client-side in `localStorage` keyed by `fulcrum_checklist_${runId}`.
+  - Checking or resetting items never mutates stock observations, decrements balances, or alters the calculated collection plan.
+
 ---
 
 ## 2. Decision Record Summary

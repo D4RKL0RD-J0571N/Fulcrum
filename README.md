@@ -1,31 +1,41 @@
-# Fulcrum — High-Density Warehouse Optimization Platform
+# Fulcrum — Order-Specific Material Planning & Fulfillment Tool
 
-Fulcrum is a simulation-first, AI-assisted fulfillment platform designed for high-density multi-tier distribution centers. It replaces guesswork and generic routing heuristics with pure deterministic discrete-event simulation, automated batch-wave grouping, and strict AI governance.
+Fulcrum is a fast, professional, desk-side order-fulfillment planning tool engineered for warehouse operators and planners. Used alongside an existing warehouse checkout and billing application, Fulcrum consolidates material demand across selected customer orders, organizes offline stock observations, and generates an actionable, reliable physical collection plan before workers step onto the warehouse floor.
+
+Fulcrum eliminates costly floor round-trips caused by missing instructions, ambiguous quantities, multi-order confusion, or conflicting container locations.
 
 ---
 
 ## 🌟 Key Capabilities
 
-1. **Deterministic Discrete-Event Simulation Engine**:
-   - Zero hallucination / zero fabricated metrics: integer virtual time clock (seconds), seeded PRNG (PCG-32), and golden-file byte-identical reproducibility.
-   - Dual-engine architecture: Pure TypeScript package (`@fulcrum/sim-engine`) for zero-config runs in the browser/Node, and high-throughput containerized C# .NET 9 worker (`Fulcrum.SimWorker`) executing >80,000 orders/sec.
-2. **High-Density Storage & Manipulation Unit (MU) Modeling**:
-   - Support for 6-digit mixed containers (MUs, e.g., `502900`, `101003`) containing packs of 5 to 6 units per sequential size variant.
-   - Granular physical constraints: Level A ground-tier platform extraction penalties (18s), inner cage shuffle delays (25s), and upper-tier forklift contention lockouts (180s).
-   - Standard rack shelf density: 2 platforms per location, 9 MUs per platform (**18 boxes per rack level**).
-3. **Control Tower Web UI (`apps/web`)**:
-   - Next.js 14 App Router with Tailwind CSS and Radix UI primitives.
-   - 2D interactive top-down plan view with real-time heatmaps and travel route overlays.
-   - Slide-out rack elevation drawer and global 6-digit MU search locator.
-   - Interactive Facility Blueprint Reconfiguration modal (dynamic rows, bays, aisle spacing).
-   - Live Order Queue Creation modal (custom 9-digit order generation with urgent/standard SLA).
-   - Material Allocation modal for live inventory placement.
-   - Governed AI recommendation panel linking directly to entity evidence chips.
-   - Side-by-side strategy comparator (Baseline discrete picking vs. Batch-Wave Proposal 4a).
-4. **Clean Architecture & Multi-Tenancy**:
-   - Pure domain core (`@fulcrum/domain`), versioned contracts (`@fulcrum/contracts`), and append-only inventory ledger.
-   - Supabase / PostgreSQL persistence adapter (`@fulcrum/persistence`) with Row-Level Security (RLS) tenant isolation on `workspace_id`.
-   - Enterprise WMS (Manhattan Associates, Blue Yonder) and ERP (SAP) normalization connectors.
+1. **Order-Specific Demand & Physical Manipulation Unit (MU) Planning**:
+   - Models physical containers (6-digit Manipulation Units like `502900`, `101003`) as shared handling units.
+   - Distinct metric tracking: unambiguously reports **total distinct physical MUs to collect** versus **total material pieces to extract**.
+   - Multi-order and multi-SKU consolidation: aggregates multiple required items from the same physical MU into a single collection task.
+   - Clean support for loose or uncontainerized stock without miscounting it as a physical container.
+   - Granular order-line level allocation traceability and shortage reporting.
+
+2. **Offline Stock Observation Semantics**:
+   - Designed for desk-side manual entry from existing operational screens:
+     - **Visualize Order**: demand requirements by material SKU, description, and quantity.
+     - **Visualize Material**: stock snapshots reported at specific bays/locations and MUs.
+   - Deterministic observation resolution (`resolveCurrentObservations`): refreshed observations cleanly supersede older snapshots for the same SKU, location, and MU without duplicate counting or accidental deletion of unrelated contents.
+   - Graceful freshness tracking: warns on stale observations according to configurable thresholds without silently invalidating usable stock.
+
+3. **Operational Safety & Location Conflict Detection**:
+   - Detects when observations associate the same physical MU identifier with multiple distinct physical locations.
+   - Emits explicit `CONFLICTING_MU_LOCATION` warnings and tags affected pick tasks.
+   - **Guaranteed Singularity**: preserves exactly one physical MU count—never duplicates or silently guesses between conflicting locations.
+   - **Execution Readiness Guard**: flags plans with unresolved conflicts (`isPlanExecutable: false`, `hasUnresolvedConflicts: true`) so issues are resolved at the desk.
+
+4. **Execution-Ready Floor Tools**:
+   - **Print-Friendly Collection Plan**: `@media print` stylesheet that strips navigation, form controls, and action chrome, leaving high-contrast typography, crisp borders, page-break protected cards, and prominent conflict warnings.
+   - **Interactive Floor Collection Checklist**: touch-friendly checkboxes for MUs and individual extraction lines with real-time progress indicators. State is saved locally in `localStorage` and strictly decoupled from inventory records—checking items never alters stock or recalculates plans.
+   - **Clipboard Export**: cleanly formatted plaintext summary for terminal or message dispatch, highlighting conflicts and operational warnings.
+
+5. **Foundational Monorepo & Deterministic Simulation Engine**:
+   - Pure domain core (`@fulcrum/domain`) enforcing invariants with zero external dependencies.
+   - Deterministic discrete-event simulation engines in TypeScript (`@fulcrum/sim-engine`) and high-throughput C# .NET 9 (`Fulcrum.SimWorker`) with golden-file regression parity for deep-bay congestion and multi-tier platform modeling.
 
 ---
 
@@ -35,27 +45,31 @@ Fulcrum is a simulation-first, AI-assisted fulfillment platform designed for hig
                            +-------------------------------------+
                            |         Presentation Layer          |
                            |    apps/web (Next.js 14 App Router) |
+                           |  - Order Intake & Material Views    |
+                           |  - Collection Plan & Floor Checklist|
                            +-------------------------------------+
                                               |
                                               v
                            +-------------------------------------+
                            |          Application Layer          |
-                           |   Use Cases, Contracts & DTOs       |
+                           |   Order Intake & Planning Store     |
+                           |   Client State & Local Persistence  |
                            +-------------------------------------+
-                                  /           |           \
-                                 /            |            \
-                                v             v             v
+                                   /           |           \
+                                  /            |            \
+                                 v             v             v
        +----------------------------+  +--------------+  +-------------------+
        |        Domain Core         |  |  Sim Engine  |  |  WMS Connectors   |
        |  packages/domain           |  |  TS & .NET 9 |  |  SAP / Manhattan  |
-       |  (Aggregates, Invariants)  |  |  Dual Parity |  |  Blue Yonder       |
+       |  (OrderMaterialPlanner,    |  |  Dual Parity |  |  Blue Yonder       |
+       |   MU Aggregates, Invariants|  |  Engines     |  |  (Legacy/Stubs)   |
        +----------------------------+  +--------------+  +-------------------+
                      ^
                      |
        +----------------------------+
        |     Persistence Layer      |
        |   packages/persistence     |
-       |   - In-Memory (Showcase)   |
+       |   - In-Memory / LocalState |
        |   - Supabase / PostgreSQL  |
        +----------------------------+
 ```
@@ -68,7 +82,6 @@ Fulcrum is a simulation-first, AI-assisted fulfillment platform designed for hig
 - Node.js 20+
 - npm 10+
 - .NET 9 SDK (optional, for C# simulation worker)
-- Docker (optional, for containerized sim worker)
 
 ### 1. Install Dependencies
 ```bash
@@ -79,28 +92,26 @@ npm install
 ```bash
 npm --workspace=apps/web run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) to launch the Operations Control Tower.
+Open [http://localhost:3000](http://localhost:3000) to launch the Fulcrum Planning Dashboard.
 
 ### 3. Run Test Suites
 ```bash
-# Run Vitest test suite across all monorepo packages
+# Run Vitest test suite across all monorepo packages (Domain, Contracts, Persistence, SimEngine, Web)
 npm run test
 
-# Run C# .NET unit and golden fixture tests
-dotnet test workers/sim-worker/Fulcrum.SimWorker.Tests/Fulcrum.SimWorker.Tests.csproj
+# Run strict TypeScript typecheck across all packages
+npm run typecheck
 
 # Run Playwright end-to-end browser tests
 npm --workspace=apps/web run test:e2e
+
+# Run C# .NET unit and golden fixture tests
+dotnet test workers/sim-worker/Fulcrum.SimWorker.Tests/Fulcrum.SimWorker.Tests.csproj
 ```
 
 ### 4. Build for Production
 ```bash
 npm --workspace=apps/web run build
-```
-
-### 5. Run the C# Simulation Worker (Standalone Self-Test Mode)
-```bash
-dotnet run --project workers/sim-worker/Fulcrum.SimWorker/Fulcrum.SimWorker.csproj
 ```
 
 ---
@@ -110,17 +121,22 @@ dotnet run --project workers/sim-worker/Fulcrum.SimWorker/Fulcrum.SimWorker.cspr
 ```text
 Fulcrum/
 ├── apps/
-│   └── web/                   # Next.js 14 App Router dashboard, interactive modals & map
+│   └── web/                   # Next.js 14 App Router: planning forms, collection plan, floor checklist & print view
+│       ├── e2e/               # Playwright E2E browser test suites
+│       └── src/
+│           ├── app/           # App routes, globals.css (@media print), main planning dashboard
+│           ├── components/    # Reusable UI controls (ThemeToggle, etc.)
+│           └── lib/           # Planning store, state management & seed scenarios
 ├── packages/
 │   ├── contracts/             # Versioned Zod schemas and TypeScript interfaces
-│   ├── domain/                # Pure DDD aggregates, layout engine & WMS connectors
-│   ├── persistence/           # Supabase & in-memory inventory ledger repositories
-│   └── sim-engine/            # TypeScript deterministic simulation engine
+│   ├── domain/                # Pure DDD core: OrderMaterialPlanner, observation resolver, conflict guards
+│   ├── persistence/           # Repositories and state adapters
+│   └── sim-engine/            # TypeScript deterministic discrete-event simulation engine
 ├── workers/
 │   └── sim-worker/            # C# .NET 9 high-throughput simulation worker & tests
 ├── supabase/
-│   └── migrations/            # SQL schemas, RLS policies & deterministic seed
-└── docs/                      # Architectural specs, ADRs, and performance reports
+│   └── migrations/            # SQL schemas and RLS policies
+└── docs/                      # Product specs, architecture specs, and operational guides
 ```
 
 ---
@@ -129,17 +145,9 @@ Fulcrum/
 
 - [Standing Rules for AI Agents](AGENTS.md)
 - [Product Specification](docs/PRODUCT_SPEC.md)
+- [Domain Model Specification](docs/DOMAIN_MODEL.md)
 - [Architecture Specification](docs/ARCHITECTURE.md)
 - [Development Roadmap & Milestones](docs/ROADMAP.md)
-- [Simulation Contract Specification](docs/SIMULATION_CONTRACT.md)
-- [Warehouse Layout Specification](docs/LAYOUT_MODEL.md)
-- [Performance & Latency Benchmark Report](docs/PERFORMANCE_REPORT.md)
-- [Executive Demo Script](docs/DEMO.md)
 - [Open Questions & Decision Log](docs/OPEN_QUESTIONS.md)
-- [Architecture Decision Records (ADRs)](docs/ADR/)
-  - [ADR-001: Simulation Engine Boundary](docs/ADR/ADR-001-simulation-engine-boundary.md)
-  - [ADR-002: Layout as Configuration](docs/ADR/ADR-002-layout-as-configuration.md)
-  - [ADR-003: Fixed Segment Order (v1)](docs/ADR/ADR-003-fixed-segment-order-v1.md)
-  - [ADR-004: Inventory as Append-Only Ledger](docs/ADR/ADR-004-inventory-as-append-only-ledger.md)
-  - [ADR-005: 2D Plan View vs 3D](docs/ADR/ADR-005-2d-plan-view-vs-3d.md)
-  - [ADR-006: In-Memory Repositories for Phase A](docs/ADR/ADR-006-in-memory-repositories-phase-a.md)
+- [Design System & UI Guidelines](docs/DESIGN_SYSTEM.md)
+- [Simulation Contract Specification](docs/SIMULATION_CONTRACT.md)
