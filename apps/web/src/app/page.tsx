@@ -18,12 +18,27 @@ import {
   X,
   Copy,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Plus,
+  Edit3,
+  Trash2,
+  Settings2,
+  Sliders,
+  PackagePlus,
+  Warehouse
 } from 'lucide-react';
 
 import { LayoutEngine, WarehouseLayoutConfig, LocationStructured } from '@fulcrum/domain';
 import { PureTypeScriptSimulationEngine } from '@fulcrum/sim-engine';
 import { SimulationInputSnapshot } from '@fulcrum/contracts';
+import {
+  FacilityState,
+  UserManipulationUnit,
+  UserCreatedOrder,
+  UserAllocatedItem,
+  createInitialFacilityState,
+  buildSimulationSnapshot
+} from '../lib/facilityStore';
 
 /* ============================================================
    1. WAREHOUSE CONFIG
@@ -221,13 +236,32 @@ function bayOf(code: string) {
 }
 
 /* Get all MUs stored across the levels of a rack bay */
-function getMusInBay(bc: string) {
+function getMusInBay(bc: string, facilityState?: FacilityState) {
   const p = parseLoc(bc + 'A');
   if (!p) return [];
+
+  // Check if we have dynamic MUs in facilityState for this bay
+  if (facilityState) {
+    const bayMus: { mu: string; level: string; skuCount: number; totalUnits: number; isMixed: boolean }[] = [];
+    facilityState.manipulationUnits.forEach(m => {
+      if (m.locationCode.startsWith(bc)) {
+        const lvl = m.locationCode.slice(bc.length) || 'A';
+        bayMus.push({
+          mu: m.muId,
+          level: lvl,
+          skuCount: m.items.length,
+          totalUnits: m.items.reduce((sum, it) => sum + it.quantityUnits, 0),
+          isMixed: m.items.length > 1
+        });
+      }
+    });
+    if (bayMus.length > 0) return bayMus;
+  }
+
   const mus: { mu: string; level: string; skuCount: number; totalUnits: number; isMixed: boolean }[] = [];
   CONFIG.levels.forEach(lvl => {
     const code = locCode(p.row, p.bay, lvl.id);
-    const plats = platformsOf(code);
+    const plats = platformsOf(code, facilityState);
     plats.forEach((pl: any) => {
       if (pl.mus && Array.isArray(pl.mus)) {
         pl.mus.forEach((m: any) => {
@@ -271,7 +305,61 @@ function statusOf(code: string) {
   return { key: "normal", label: "Normal", cls: "live" };
 }
 
-function platformsOf(code: string) {
+function platformsOf(code: string, facilityState?: FacilityState) {
+  // If dynamic MUs exist in facility state for this specific location code
+  if (facilityState) {
+    const allocatedMus = facilityState.manipulationUnits.filter(m => m.locationCode === code);
+    if (allocatedMus.length > 0) {
+      const p1Mus = allocatedMus.filter(m => m.platformId === 'plat_1' || !m.platformId.includes('2'));
+      const p2Mus = allocatedMus.filter(m => m.platformId === 'plat_2' || m.platformId.includes('2'));
+
+      return [
+        {
+          name: "Platform 1 (Front Pull-out)",
+          maxMuCapacity: CONFIG.maxMusPerPlatform,
+          muCount: p1Mus.length,
+          mus: p1Mus.map(m => ({
+            mu: m.muId,
+            totalUnits: m.items.reduce((s, it) => s + it.quantityUnits, 0),
+            isMixed: m.items.length > 1,
+            items: m.items.map(it => ({
+              sku: it.sku,
+              skuName: it.skuName,
+              parentSku: it.parentSku,
+              qty: it.quantityUnits,
+              lot: it.lotNumber,
+              status: "Active"
+            }))
+          })),
+          mu: p1Mus[0]?.muId || "502900",
+          totalUnits: p1Mus.reduce((sum, m) => sum + m.items.reduce((s, it) => s + it.quantityUnits, 0), 0),
+          items: p1Mus[0]?.items || []
+        },
+        {
+          name: "Platform 2 (Rear/Inner)",
+          maxMuCapacity: CONFIG.maxMusPerPlatform,
+          muCount: p2Mus.length,
+          mus: p2Mus.map(m => ({
+            mu: m.muId,
+            totalUnits: m.items.reduce((s, it) => s + it.quantityUnits, 0),
+            isMixed: m.items.length > 1,
+            items: m.items.map(it => ({
+              sku: it.sku,
+              skuName: it.skuName,
+              parentSku: it.parentSku,
+              qty: it.quantityUnits,
+              lot: it.lotNumber,
+              status: "Active"
+            }))
+          })),
+          mu: p2Mus[0]?.muId || "101003",
+          totalUnits: p2Mus.reduce((sum, m) => sum + m.items.reduce((s, it) => s + it.quantityUnits, 0), 0),
+          items: p2Mus[0]?.items || []
+        }
+      ];
+    }
+  }
+
   const cur = DATA.locations[code];
   if (cur) return cur.platforms;
   const facts = locFacts(code);
@@ -336,6 +424,7 @@ const MODES = [
 
 export default function OperationalOverviewPage() {
   const [activeNav, setActiveNav] = useState<string>("overview");
+  const [facility, setFacility] = useState<FacilityState>(() => createInitialFacilityState());
   const [selectedLoc, setSelectedLoc] = useState<string>("EH14D");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
   const [mode, setMode] = useState<string>("density");
@@ -345,12 +434,40 @@ export default function OperationalOverviewPage() {
   const [hoveredBay, setHoveredBay] = useState<string | null>(null);
   const [simRun, setSimRun] = useState<number>(0);
   const [simBusy, setSimBusy] = useState<boolean>(false);
+  const [simResults, setSimResults] = useState<any | null>(null);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [modalApproved, setModalApproved] = useState<boolean>(false);
   const [reviewChecked, setReviewChecked] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [openPlatforms, setOpenPlatforms] = useState<Record<number, boolean>>({ 0: true });
   const [feedErrorDismissed, setFeedErrorDismissed] = useState<boolean>(false);
+
+  // Dynamic builder modals
+  const [allocateModalOpen, setAllocateModalOpen] = useState<boolean>(false);
+  const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
+  const [layoutModalOpen, setLayoutModalOpen] = useState<boolean>(false);
+
+  // New allocation form state
+  const [newMuId, setNewMuId] = useState<string>("603100");
+  const [newLocationCode, setNewLocationCode] = useState<string>("EH14A");
+  const [newPlatformSlot, setNewPlatformSlot] = useState<string>("plat_1");
+  const [newSku, setNewSku] = useState<string>("1524289001");
+  const [newSkuName, setNewSkuName] = useState<string>("Athletic Tee Slim — Black / S");
+  const [newParentSku, setNewParentSku] = useState<string>("1524289");
+  const [newQty, setNewQty] = useState<number>(6);
+  const [newLot, setNewLot] = useState<string>("L-A99");
+
+  // New order form state
+  const [newOrderId, setNewOrderId] = useState<string>("000815302");
+  const [newOrderPriority, setNewOrderPriority] = useState<'HIGH' | 'STANDARD'>('HIGH');
+  const [newOrderSku, setNewOrderSku] = useState<string>("1524289001");
+  const [newOrderQty, setNewOrderQty] = useState<number>(1);
+
+  // Layout editor state
+  const [layoutRowCount, setLayoutRowCount] = useState<number>(facility.layout.rowCount);
+  const [layoutBaysPerRow, setLayoutBaysPerRow] = useState<number>(facility.layout.defaultBaysPerRow);
+  const [layoutBayWidth, setLayoutBayWidth] = useState<number>(facility.layout.bayWidthMeters);
+  const [layoutAisleWidth, setLayoutAisleWidth] = useState<number>(facility.layout.aisleWidthMeters);
 
   // SVG Geometry
   const GEOM = { labelW: 34, headH: 18, cellW: 33, cellH: 12, rowGap: 3, aisle: 14 };
@@ -412,9 +529,152 @@ export default function OperationalOverviewPage() {
     if (simBusy) return;
     setSimBusy(true);
     setTimeout(() => {
-      setSimRun(1);
-      setSimBusy(false);
-    }, 1400);
+      try {
+        const engine = new PureTypeScriptSimulationEngine();
+        const baseSnapshot = buildSimulationSnapshot(facility, 'BASELINE', 48213);
+        const propSnapshot = buildSimulationSnapshot(facility, 'BATCH_WAVE_ROUTING', 48213);
+        const baseResult = engine.executeRun(baseSnapshot);
+        const propResult = engine.executeRun(propSnapshot);
+
+        setSimResults({
+          base: baseResult.summary_metrics,
+          prop: propResult.summary_metrics,
+          runId: `SIM-${Math.floor(2000 + Math.random() * 500)}`
+        });
+        setSimRun(1);
+      } catch (err) {
+        console.error("Simulation error:", err);
+      } finally {
+        setSimBusy(false);
+      }
+    }, 900);
+  };
+
+  const handleSaveLayout = () => {
+    try {
+      const updatedConfig: WarehouseLayoutConfig = {
+        ...facility.layout,
+        rowCount: layoutRowCount,
+        defaultBaysPerRow: layoutBaysPerRow,
+        bayWidthMeters: layoutBayWidth,
+        aisleWidthMeters: layoutAisleWidth,
+        version: facility.layout.version + 1
+      };
+      const newLocations = LayoutEngine.generateLocations(updatedConfig);
+      setFacility(prev => ({
+        ...prev,
+        layout: updatedConfig,
+        locations: newLocations
+      }));
+      setLayoutModalOpen(false);
+    } catch (err: any) {
+      alert(`Invalid layout: ${err.message}`);
+    }
+  };
+
+  const handleAllocateMaterial = () => {
+    if (!newMuId || !newLocationCode || !newSku) {
+      alert("Please enter MU ID, Location Code, and SKU.");
+      return;
+    }
+
+    const locId = `loc_${newLocationCode.replace(/[^A-Za-z0-9]/g, '_')}`;
+    const newItem: UserAllocatedItem = {
+      sku: newSku,
+      skuName: newSkuName || `Item ${newSku}`,
+      parentSku: newParentSku || newSku.slice(0, 7),
+      quantityUnits: newQty,
+      lotNumber: newLot || 'LOT-01'
+    };
+
+    setFacility(prev => {
+      const existingMuIndex = prev.manipulationUnits.findIndex(m => m.muId === newMuId);
+      let updatedMus = [...prev.manipulationUnits];
+
+      if (existingMuIndex >= 0) {
+        const existing = updatedMus[existingMuIndex];
+        const existingItemIdx = existing.items.findIndex(it => it.sku === newSku);
+        let updatedItems = [...existing.items];
+        if (existingItemIdx >= 0) {
+          updatedItems[existingItemIdx] = {
+            ...updatedItems[existingItemIdx],
+            quantityUnits: updatedItems[existingItemIdx].quantityUnits + newQty
+          };
+        } else {
+          updatedItems.push(newItem);
+        }
+        updatedMus[existingMuIndex] = {
+          ...existing,
+          locationId: locId,
+          locationCode: newLocationCode,
+          platformId: newPlatformSlot,
+          items: updatedItems
+        };
+      } else {
+        updatedMus.push({
+          muId: newMuId,
+          locationId: locId,
+          locationCode: newLocationCode,
+          platformId: newPlatformSlot,
+          platformName: newPlatformSlot === 'plat_1' ? 'Platform 1 (Ground Manual Pull)' : 'Platform 2 (Manual)',
+          items: [newItem]
+        });
+      }
+
+      // Append ledger movement
+      prev.ledger.appendMovement({
+        movementId: `mov_${Date.now()}_${newMuId}`,
+        workspaceId: prev.layout.workspaceId,
+        idempotencyKey: `alloc_${Date.now()}`,
+        timestamp: Date.now(),
+        movementType: 'RECEIPT',
+        toLocationId: locId,
+        toMuId: newMuId,
+        sku: newSku,
+        quantityUnits: newQty,
+        lotNumber: newLot,
+        reason: 'User allocation'
+      });
+
+      return {
+        ...prev,
+        manipulationUnits: updatedMus
+      };
+    });
+
+    setAllocateModalOpen(false);
+  };
+
+  const handleCreateOrder = () => {
+    if (!newOrderId || !newOrderSku) {
+      alert("Please enter Order ID and SKU.");
+      return;
+    }
+
+    const order: UserCreatedOrder = {
+      orderId: newOrderId,
+      arrivalTimeSeconds: facility.orders.length * 60,
+      deadlineSeconds: 3600,
+      priority: newOrderPriority,
+      items: [
+        {
+          lineId: `line_${Date.now()}`,
+          sku: newOrderSku,
+          quantityUnits: newOrderQty,
+          skuName: `Product ${newOrderSku}`
+        }
+      ]
+    };
+
+    setFacility(prev => ({
+      ...prev,
+      orders: [order, ...prev.orders]
+    }));
+
+    setOrderModalOpen(false);
+    // Increment order id for next entry
+    const nextNum = (parseInt(newOrderId, 10) + 1).toString().padStart(9, '0');
+    setNewOrderId(nextNum);
   };
 
   const handleCopy = () => {
@@ -439,11 +699,19 @@ export default function OperationalOverviewPage() {
         (e.target as HTMLInputElement).blur();
         return;
       }
+      // Scan facility MUs first
+      const foundFacilityMu = facility.manipulationUnits.find(m => m.muId === muTarget);
+      if (foundFacilityMu) {
+        setSearchErr(null);
+        selectLocation(foundFacilityMu.locationCode);
+        (e.target as HTMLInputElement).blur();
+        return;
+      }
       // Scan bays for matching generated MU
       for (const r of CONFIG.rows) {
         for (let b = 1; b <= r.bays; b++) {
           const bc = bayCode(r.id, b);
-          const mus = getMusInBay(bc);
+          const mus = getMusInBay(bc, facility);
           if (mus.some(m => m.mu === muTarget)) {
             setSearchErr(null);
             selectLocation(`${bc}A`);
@@ -736,66 +1004,102 @@ export default function OperationalOverviewPage() {
 
             {activeNav === 'orders' && (
               <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Total Orders (Today)</span>
-                    <div className="text-xl font-bold mono text-text-1 mt-1">1,842</div>
+                <div className="flex items-center justify-between">
+                  <div className="grid grid-cols-4 gap-3 flex-1 mr-4">
+                    <div className="bg-surface-2 p-3 rounded border border-border">
+                      <span className="text-[10px] uppercase text-text-3">Active Order Lines</span>
+                      <div className="text-xl font-bold mono text-text-1 mt-1">{facility.orders.length} orders</div>
+                    </div>
+                    <div className="bg-surface-2 p-3 rounded border border-border">
+                      <span className="text-[10px] uppercase text-text-3">High Priority</span>
+                      <div className="text-xl font-bold mono text-warn mt-1">
+                        {facility.orders.filter(o => o.priority === 'HIGH').length}
+                      </div>
+                    </div>
+                    <div className="bg-surface-2 p-3 rounded border border-border">
+                      <span className="text-[10px] uppercase text-text-3">Configured MUs</span>
+                      <div className="text-xl font-bold mono text-live mt-1">
+                        {facility.manipulationUnits.length} units
+                      </div>
+                    </div>
+                    <div className="bg-surface-2 p-3 rounded border border-border">
+                      <span className="text-[10px] uppercase text-text-3">Simulation Status</span>
+                      <div className="text-xl font-bold mono text-ai mt-1">
+                        {simRun === 1 ? 'Simulated' : 'Ready'}
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Pending Allocation</span>
-                    <div className="text-xl font-bold mono text-warn mt-1">78</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Fulfilled in Shift</span>
-                    <div className="text-xl font-bold mono text-live mt-1">1,340</div>
-                  </div>
-                  <div className="bg-surface-2 p-3 rounded border border-border">
-                    <span className="text-[10px] uppercase text-text-3">Batch-Wave Opportunities</span>
-                    <div className="text-xl font-bold mono text-ai mt-1">42 batches</div>
-                  </div>
+                  <button
+                    onClick={() => setOrderModalOpen(true)}
+                    className="flex items-center gap-1.5 h-9 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition shadow-md"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New Customer Order
+                  </button>
                 </div>
 
                 <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Live Ingestion & Order Flow</h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider">Dynamic Order Queue ({facility.orders.length})</h3>
+                    <span className="text-[11px] text-text-3">Single-unit & multi-line orders targeting physical MUs</span>
+                  </div>
                   <table className="w-full text-xs text-left">
                     <thead>
                       <tr className="border-b border-border text-text-3 text-[10px]">
-                        <th className="p-2">Order ID</th>
+                        <th className="p-2">Order ID (9-Digit)</th>
+                        <th className="p-2">Priority</th>
                         <th className="p-2">SKU Details</th>
-                        <th className="p-2">MU Container</th>
-                        <th className="p-2">Location</th>
-                        <th className="p-2">Status</th>
+                        <th className="p-2">Quantity</th>
+                        <th className="p-2">Target Location / MU</th>
+                        <th className="p-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/60 mono text-[11px]">
-                      <tr>
-                        <td className="p-2 text-live font-semibold">000815296</td>
-                        <td className="p-2 font-sans">Athletic Tee Slim - S (1524289001)</td>
-                        <td className="p-2 text-cyan-400">502900</td>
-                        <td className="p-2">EH14A</td>
-                        <td className="p-2 text-live font-sans">Picking (Batch 1)</td>
-                      </tr>
-                      <tr>
-                        <td className="p-2 text-live font-semibold">000815297</td>
-                        <td className="p-2 font-sans">Athletic Tee Slim - M (1524289002)</td>
-                        <td className="p-2 text-cyan-400">502900</td>
-                        <td className="p-2">EH14A</td>
-                        <td className="p-2 text-live font-sans">Picking (Batch 1)</td>
-                      </tr>
-                      <tr>
-                        <td className="p-2 font-semibold">000815298</td>
-                        <td className="p-2 font-sans">High-Rise Compression Pant - XL</td>
-                        <td className="p-2 text-cyan-400">101003</td>
-                        <td className="p-2">EH14D</td>
-                        <td className="p-2 text-warn font-sans">Forklift Lockout</td>
-                      </tr>
-                      <tr>
-                        <td className="p-2 font-semibold">000815299</td>
-                        <td className="p-2 font-sans">Athletic Tee Slim - L (1524289003)</td>
-                        <td className="p-2 text-cyan-400">502900</td>
-                        <td className="p-2">EH14A</td>
-                        <td className="p-2 text-text-3 font-sans">Queued</td>
-                      </tr>
+                      {facility.orders.map(order => {
+                        const targetMu = facility.manipulationUnits.find(m =>
+                          m.items.some(it => it.sku === order.items[0]?.sku)
+                        );
+                        return (
+                          <tr key={order.orderId} className="hover:bg-surface-2/60">
+                            <td className="p-2 text-live font-semibold">{order.orderId}</td>
+                            <td className="p-2 font-sans">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                order.priority === 'HIGH' ? 'bg-warn-dim text-warn border border-warn/40' : 'bg-surface-3 text-text-2'
+                              }`}>
+                                {order.priority}
+                              </span>
+                            </td>
+                            <td className="p-2 font-sans">
+                              <span className="text-text-1 font-semibold">{order.items[0]?.sku}</span>
+                              <span className="text-text-3 ml-1.5 text-[10px]">({order.items[0]?.skuName || 'Unit Item'})</span>
+                            </td>
+                            <td className="p-2 text-text-1">{order.items[0]?.quantityUnits}u</td>
+                            <td className="p-2 font-sans">
+                              {targetMu ? (
+                                <span className="flex items-center gap-1.5">
+                                  <span className="mono font-semibold text-text-1">{targetMu.locationCode}</span>
+                                  <span className="text-cyan-400 mono">MU {targetMu.muId}</span>
+                                </span>
+                              ) : (
+                                <span className="text-warn text-[10px]">Unallocated stock</span>
+                              )}
+                            </td>
+                            <td className="p-2 font-sans">
+                              <button
+                                onClick={() => {
+                                  setFacility(prev => ({
+                                    ...prev,
+                                    orders: prev.orders.filter(o => o.orderId !== order.orderId)
+                                  }));
+                                }}
+                                className="text-crit hover:underline text-[11px]"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -804,46 +1108,61 @@ export default function OperationalOverviewPage() {
 
             {activeNav === 'inventory' && (
               <div className="flex flex-col gap-4">
-                <div className="p-3 border border-warn/35 bg-warn-dim rounded text-xs text-warn flex items-center justify-between">
-                  <span>14 SKUs below minimum replenishment threshold across manual pick zones.</span>
-                  <button className="underline text-xs">Run Replenishment Run</button>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-1">Facility Inventory & Manipulation Units (MUs)</h3>
+                    <p className="text-xs text-text-3 mt-0.5">
+                      Mixed storage boxes holding packs of 5-6 units per sequential size (18 boxes per rack level).
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAllocateModalOpen(true)}
+                    className="flex items-center gap-1.5 h-9 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition shadow-md"
+                  >
+                    <PackagePlus className="h-3.5 w-3.5" />
+                    Allocate Material to MU
+                  </button>
                 </div>
-                <div className="border border-border rounded bg-bg-1 p-3">
-                  <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Manipulation Unit (MU) Stock Balances</h3>
-                  <table className="w-full text-xs text-left">
-                    <thead>
-                      <tr className="border-b border-border text-text-3 text-[10px]">
-                        <th className="p-2">MU ID (Box/Cage)</th>
-                        <th className="p-2">Rack Location</th>
-                        <th className="p-2">Stored SKUs</th>
-                        <th className="p-2">Total Units</th>
-                        <th className="p-2">Platform Slot</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60 mono text-[11px]">
-                      <tr>
-                        <td className="p-2 text-cyan-400 font-bold">502900</td>
-                        <td className="p-2">EH14A</td>
-                        <td className="p-2 font-sans">1524289001 (6u), 1524289002 (5u)</td>
-                        <td className="p-2 text-live">11 units</td>
-                        <td className="p-2 font-sans">Platform 1 (Manual Pull)</td>
-                      </tr>
-                      <tr>
-                        <td className="p-2 text-cyan-400 font-bold">101003</td>
-                        <td className="p-2">EH14D</td>
-                        <td className="p-2 font-sans">1524289004 (6u)</td>
-                        <td className="p-2 text-live">6 units</td>
-                        <td className="p-2 font-sans">Platform 1 (Forklift)</td>
-                      </tr>
-                      <tr>
-                        <td className="p-2 text-cyan-400 font-bold">202005</td>
-                        <td className="p-2">EC07A</td>
-                        <td className="p-2 font-sans">1524289001 (12u)</td>
-                        <td className="p-2 text-live">12 units</td>
-                        <td className="p-2 font-sans">Platform 2 (Manual)</td>
-                      </tr>
-                    </tbody>
-                  </table>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {facility.manipulationUnits.map(mu => (
+                    <div key={mu.muId} className="border border-border rounded bg-surface-2 p-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between border-b border-border/80 pb-2">
+                          <span className="mono text-sm font-bold text-cyan-400">Box/MU #{mu.muId}</span>
+                          <span className="mono text-xs px-1.5 py-0.5 rounded bg-bg-1 border border-border text-text-1">
+                            {mu.locationCode}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-text-3 mt-1.5 font-medium">
+                          {mu.platformName}
+                        </div>
+                        <div className="mt-2.5 space-y-1.5">
+                          {mu.items.map(it => (
+                            <div key={it.sku} className="flex items-center justify-between text-[11px] bg-bg-1/80 p-1.5 rounded">
+                              <div className="truncate max-w-[180px]">
+                                <span className="mono font-semibold text-text-1 mr-1">{it.sku}</span>
+                                <span className="text-text-3 text-[10px]">{it.skuName}</span>
+                              </div>
+                              <span className="mono text-live font-bold">{it.quantityUnits}u</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-border flex items-center justify-between text-[10px] text-text-3">
+                        <span>Total Units: <b className="text-text-1 mono">{mu.items.reduce((s, i) => s + i.quantityUnits, 0)}u</b></span>
+                        <button
+                          onClick={() => {
+                            selectLocation(mu.locationCode);
+                            setActiveNav('overview');
+                          }}
+                          className="text-live hover:underline font-semibold"
+                        >
+                          Inspect on Map ›
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -959,6 +1278,44 @@ export default function OperationalOverviewPage() {
 
             {activeNav === 'settings' && (
               <div className="flex flex-col gap-4">
+                <div className="border border-border rounded bg-bg-1 p-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-1 flex items-center gap-2">
+                      <Warehouse className="h-4 w-4 text-live" />
+                      Warehouse Dimensions & Blueprint Configuration
+                    </h3>
+                    <p className="text-xs text-text-3 mt-0.5">
+                      Configure row counts, bays per row, and physical rack spacing. Regenerates {facility.locations.length} storage locations.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setLayoutModalOpen(true)}
+                    className="flex items-center gap-1.5 h-8 px-3.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
+                  >
+                    <Sliders className="h-3.5 w-3.5" />
+                    Configure Layout Blueprint
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Configured Rows</span>
+                    <div className="text-xl font-bold mono text-text-1 mt-1">{facility.layout.rowCount} rows (A–Z)</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Default Bays / Row</span>
+                    <div className="text-xl font-bold mono text-text-1 mt-1">{facility.layout.defaultBaysPerRow} bays</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Addressable Locations</span>
+                    <div className="text-xl font-bold mono text-live mt-1">{facility.locations.length} bins</div>
+                  </div>
+                  <div className="bg-surface-2 p-3 rounded border border-border">
+                    <span className="text-[10px] uppercase text-text-3">Max MU Capacity</span>
+                    <div className="text-xl font-bold mono text-cyan-400 mt-1">18 MUs / level</div>
+                  </div>
+                </div>
+
                 <div className="border border-border rounded bg-bg-1 p-3">
                   <h3 className="text-xs font-semibold text-text-2 uppercase tracking-wider mb-2">Facility & Rule Parameters</h3>
                   <div className="grid grid-cols-2 gap-3 text-xs">
@@ -1671,15 +2028,15 @@ export default function OperationalOverviewPage() {
 
             <div className="p-4 overflow-y-auto flex flex-col gap-3 text-xs leading-relaxed">
               <div className="flex gap-3 text-[11px] text-text-2 mono flex-wrap">
-                <span>Source run <b className="text-text-1">SIM-2041</b></span>
-                <span>Affected orders <b className="text-text-1">28</b> (of 78 at risk)</span>
+                <span>Source run <b className="text-text-1">{simResults ? simResults.runId : 'SIM-2041'}</b></span>
+                <span>Affected orders <b className="text-text-1">{facility.orders.length}</b></span>
                 <span>Window <b className="text-text-1">13:00–14:00</b></span>
               </div>
 
               <ol className="list-decimal pl-5 space-y-1.5 text-text-1">
-                <li>Defer forklift replenishment at <span className="mono font-semibold">EH14D</span> from 13:00 to <b>14:00–14:30</b>.</li>
-                <li>Re-route <b>9 manual picks</b> from <span className="mono font-semibold">EH14A–C</span> to <span className="mono font-semibold">EC07A</span> (stock verified, 216 units available).</li>
-                <li>Hold wave release for orders <span className="mono font-semibold">ORD-8812</span> and <span className="mono font-semibold">ORD-8814</span> until re-route confirms.</li>
+                <li>Consolidate multi-order picks targeting the same 6-digit MU (e.g. MU 502900).</li>
+                <li>Eliminate Level A ground platform pull-out penalties (18s saved per consolidated pick).</li>
+                <li>Hold wave release until high-density wave grouping confirms.</li>
               </ol>
 
               <label className="flex items-start gap-2 p-2 border border-border rounded bg-bg-1 cursor-pointer text-[11px] text-text-2 mt-1">
@@ -1689,7 +2046,7 @@ export default function OperationalOverviewPage() {
                   onChange={e => setReviewChecked(e.target.checked)}
                   className="mt-0.5 accent-live"
                 />
-                <span>I reviewed the simulation results (SIM-2041, seed 48213, 8 h horizon) and the 28 affected orders.</span>
+                <span>I reviewed the simulation results and the affected orders.</span>
               </label>
             </div>
 
@@ -1709,6 +2066,346 @@ export default function OperationalOverviewPage() {
                 className="h-7 px-3 rounded text-[11px] font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== ALLOCATE MATERIAL MODAL ==================== */}
+      {allocateModalOpen && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+          <div className="w-[500px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
+              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
+                <PackagePlus className="h-4 w-4 text-live" />
+                Allocate Materials to Manipulation Unit (MU)
+              </h2>
+              <button onClick={() => setAllocateModalOpen(false)} className="text-text-3 hover:text-text-1">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    MU Number (6 Digits)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={newMuId}
+                    onChange={e => setNewMuId(e.target.value.replace(/\D/g, ''))}
+                    placeholder="e.g. 502900"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Target Rack Location
+                  </label>
+                  <input
+                    type="text"
+                    value={newLocationCode}
+                    onChange={e => setNewLocationCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. EH14A, EC07A"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                  Platform Slot
+                </label>
+                <select
+                  value={newPlatformSlot}
+                  onChange={e => setNewPlatformSlot(e.target.value)}
+                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
+                >
+                  <option value="plat_1">Platform 1 (Ground Manual Pull - 18s extraction)</option>
+                  <option value="plat_2">Platform 2 (Rear / Inner Cage - 25s shuffle)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="col-span-2">
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    SKU Code
+                  </label>
+                  <input
+                    type="text"
+                    value={newSku}
+                    onChange={e => setNewSku(e.target.value)}
+                    placeholder="e.g. 1524289001"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Pack Units
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={newQty}
+                    onChange={e => setNewQty(parseInt(e.target.value, 10) || 1)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Item Name / Description
+                  </label>
+                  <input
+                    type="text"
+                    value={newSkuName}
+                    onChange={e => setNewSkuName(e.target.value)}
+                    placeholder="e.g. Athletic Tee Slim - S"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Lot Number
+                  </label>
+                  <input
+                    type="text"
+                    value={newLot}
+                    onChange={e => setNewLot(e.target.value)}
+                    placeholder="e.g. LOT-A99"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-bg-1/80 border border-border/80 rounded text-[11px] text-text-3 leading-relaxed">
+                <span className="text-live font-semibold">Note:</span> Each level holds 2 platforms with up to 9 MUs per platform (18 boxes total). Adding units appends an immutable transaction to the append-only stock balance ledger.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
+              <button
+                onClick={() => setAllocateModalOpen(false)}
+                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAllocateMaterial}
+                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
+              >
+                Save & Stock MU
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== CREATE CUSTOMER ORDER MODAL ==================== */}
+      {orderModalOpen && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+          <div className="w-[460px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
+              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
+                <Plus className="h-4 w-4 text-live" />
+                Create New Fulfillment Order
+              </h2>
+              <button onClick={() => setOrderModalOpen(false)} className="text-text-3 hover:text-text-1">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Order ID (9 Digits)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={9}
+                    value={newOrderId}
+                    onChange={e => setNewOrderId(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000815302"
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Priority Tier
+                  </label>
+                  <select
+                    value={newOrderPriority}
+                    onChange={e => setNewOrderPriority(e.target.value as any)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 text-text-1 focus:border-live outline-none"
+                  >
+                    <option value="HIGH">HIGH (Urgent SLA)</option>
+                    <option value="STANDARD">STANDARD (Shift SLA)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                  Requested Material SKU
+                </label>
+                <select
+                  value={newOrderSku}
+                  onChange={e => setNewOrderSku(e.target.value)}
+                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                >
+                  {facility.manipulationUnits.flatMap(m => m.items).map((item, idx) => (
+                    <option key={idx} value={item.sku}>
+                      {item.sku} — {item.skuName} ({item.quantityUnits}u available)
+                    </option>
+                  ))}
+                  <option value="1524289001">1524289001 — Athletic Tee Slim S</option>
+                  <option value="1524289002">1524289002 — Athletic Tee Slim M</option>
+                  <option value="1524289003">1524289003 — Athletic Tee Slim L</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                  Requested Units (Piece-Pick)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={newOrderQty}
+                  onChange={e => setNewOrderQty(parseInt(e.target.value, 10) || 1)}
+                  className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                />
+              </div>
+
+              <div className="p-2.5 bg-bg-1/80 border border-border/80 rounded text-[11px] text-text-3 leading-relaxed">
+                Orders with identical items stored in the same MU can be evaluated in simulation to compare standard discrete picking against batch-wave grouping.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
+              <button
+                onClick={() => setOrderModalOpen(false)}
+                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateOrder}
+                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
+              >
+                Add Order to Queue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== CONFIGURE LAYOUT BLUEPRINT MODAL ==================== */}
+      {layoutModalOpen && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+          <div className="w-[520px] bg-surface border border-border-strong rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-3.5 px-4 border-b border-border bg-surface-2">
+              <h2 className="text-sm font-semibold text-text-1 flex items-center gap-2">
+                <Sliders className="h-4 w-4 text-live" />
+                Configure Physical Facility Dimensions
+              </h2>
+              <button onClick={() => setLayoutModalOpen(false)} className="text-text-3 hover:text-text-1">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Number of Rows (A–Z)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={26}
+                    value={layoutRowCount}
+                    onChange={e => setLayoutRowCount(parseInt(e.target.value, 10) || 1)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Default Bays per Row
+                  </label>
+                  <input
+                    type="number"
+                    min={4}
+                    max={30}
+                    value={layoutBaysPerRow}
+                    onChange={e => setLayoutBaysPerRow(parseInt(e.target.value, 10) || 4)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Bay Width (Meters)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min={0.8}
+                    max={3.0}
+                    value={layoutBayWidth}
+                    onChange={e => setLayoutBayWidth(parseFloat(e.target.value) || 1.2)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-text-3 text-[10px] uppercase font-semibold mb-1">
+                    Aisle Spacing (Meters)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min={1.5}
+                    max={5.0}
+                    value={layoutAisleWidth}
+                    onChange={e => setLayoutAisleWidth(parseFloat(e.target.value) || 2.8)}
+                    className="w-full bg-bg-1 border border-border rounded px-2.5 py-1.5 mono text-text-1 focus:border-live outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-bg-1/80 border border-border rounded text-[11px] text-text-2 space-y-1">
+                <div>Calculated Storage Capacity:</div>
+                <div className="mono font-semibold text-live">
+                  {layoutRowCount * layoutBaysPerRow * 4} total shelf locations ({layoutRowCount * layoutBaysPerRow * 4 * 18} max MUs)
+                </div>
+                <div className="text-[10px] text-text-3">
+                  All coordinates (X, Y, Z) and travel distances are dynamically derived through LayoutEngine.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 p-3 px-4 border-t border-border bg-surface-2">
+              <button
+                onClick={() => setLayoutModalOpen(false)}
+                className="px-3 py-1.5 rounded text-xs border border-border text-text-2 hover:text-text-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveLayout}
+                className="px-4 py-1.5 rounded text-xs font-semibold bg-live hover:bg-[#5EEAD4] text-[#06231F] transition"
+              >
+                Regenerate Blueprint
               </button>
             </div>
           </div>
